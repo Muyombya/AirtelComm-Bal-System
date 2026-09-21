@@ -1,0 +1,10 @@
+BEGIN;
+
+ALTER TABLE app_users
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+UPDATE app_users
+SET updated_at = NOW()
+WHERE updated_at IS NULL;
+
+COMMIT;

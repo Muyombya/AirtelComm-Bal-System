@@ -1,0 +1,51 @@
+.general-shop-status{max-width:1100px;margin:0 auto;padding:12px;font-size:13px;color:#172033}.general-shop-status *{box-sizing:border-box}.gss-report-header{display:flex;align-items:center;justify-content:space-between;border:1px solid #8fa6c0;background:#dceaf8;padding:6px 10px}.gss-report-header h1{margin:0;font-size:21px;letter-spacing:.08em;text-align:center;flex:1}.gss-header-controls{display:flex;align-items:center;gap:12px;font-size:11px}.gss-header-controls span{font-weight:700}.gss-header-controls label{display:flex;align-items:center;gap:5px}.gss-header-controls input{font-size:12px;padding:3px 5px}.gss-status-line{text-align:center;font-weight:800;padding:4px;border:1px solid #8fa6c0;background:#edf4fb}.gss-status-line.short{color:#b42318}.gss-status-line.excess{color:#087443}.gss-message{margin:5px 0;padding:6px 8px}.gss-report-top{display:grid;grid-template-columns:1.35fr .95fr;gap:0;border:1px solid #8fa6c0}.gss-report-panel{border:1px solid #8fa6c0;background:#fff;overflow:hidden}.gss-report-top>.gss-report-panel,.gss-report-side>.gss-report-panel{border:0;border-right:1px solid #8fa6c0}.gss-report-side{display:flex;flex-direction:column}.gss-report-side>.gss-report-panel:last-child{border-right:0}.gss-report-title{text-align:center;background:#cfe1f3;border-bottom:1px solid #8fa6c0;font-weight:800;letter-spacing:.05em;padding:5px 4px}.gss-table{width:100%}.gss-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(105px,.75fr);align-items:center;min-height:25px;border-bottom:1px solid #d5dfeb}.gss-row>span{padding:3px 7px}.gss-row .gss-number{text-align:right}.gss-head{font-weight:800;background:#e8f1f9}.gss-total-row{font-weight:800;background:#eef5fb}.gss-empty{padding:8px;text-align:center;color:#64748b}.gss-accessories-panel{margin-top:0}.gss-accessories-inline{display:grid;grid-template-columns:1fr 105px auto;align-items:center;gap:5px;padding:6px}.gss-accessories-inline input,.gss-payment-cell input{width:100%;min-width:0;border:1px solid #9db0c7;border-radius:3px;padding:4px 6px;text-align:right}.gss-accessories-inline button,.gss-payment-cell button,.gss-reason-line button{border:1px solid #52779e;background:#e7f0f8;border-radius:3px;padding:4px 8px;cursor:pointer}.gss-capital-panel{border:1px solid #8fa6c0;border-top:0}.gss-capital-row{display:grid;grid-template-columns:165px 1fr;border-bottom:1px solid #d5dfeb;min-height:25px}.gss-capital-row span{padding:3px 7px;color:#526579}.gss-capital-row strong{padding:3px 7px;text-align:right}.gss-adjusted-row{background:#f5f9fd}.gss-reason-line{display:grid;grid-template-columns:165px 1fr auto;align-items:stretch;min-height:54px}.gss-reason-line>span{padding:6px 7px;color:#526579}.gss-reason-line textarea{border:0;border-left:1px solid #d5dfeb;resize:vertical;padding:6px;font:inherit;min-height:48px}.gss-reason-line button{align-self:center;margin:5px}.gss-full-panel{margin-top:7px}.gss-till-grid{grid-template-columns:1.05fr 1fr .9fr .9fr .9fr .8fr}.gss-till-grid>span{min-width:0}.gss-status-tag{font-size:10px;font-weight:800;white-space:nowrap}.gss-status-tag.short{color:#b42318}.gss-status-tag.excess{color:#087443}.gss-status-tag.balanced{color:#1769aa}.shortage-grid{grid-template-columns:1.15fr 1fr 1.05fr 1fr .9fr 44px}.shortage-grid>span{min-width:0}.gss-payment-cell{display:flex!important;align-items:center;gap:4px}.gss-payment-cell input{width:92px}.gss-payment-cell button{padding:3px 6px}.gss-shortage-total{display:grid;grid-template-columns:1.15fr 1fr 1.05fr 1fr .9fr 44px;font-weight:800;background:#eaf3fb;border-top:1px solid #8fa6c0}.gss-shortage-total span{padding:4px 7px;text-align:right}.gss-shortage-total span:first-child{text-align:left}.gss-shortage-note{padding:6px 8px;font-size:11px;color:#526579;background:#f5f9fd;border-top:1px solid #d5dfeb}.gss-history-grid{grid-template-columns:110px 1fr 1fr 100px 1.5fr}.negative{color:#b42318}.positive{color:#087443}.gss-history-section{margin-bottom:20px}@media(max-width:760px){.general-shop-status{padding:6px;font-size:12px}.gss-report-header{display:block}.gss-report-header h1{font-size:18px}.gss-header-controls{justify-content:space-between;margin-top:5px}.gss-report-top{grid-template-columns:1fr}.gss-report-top>.gss-report-panel{border-right:0;border-bottom:1px solid #8fa6c0}.gss-report-side>.gss-report-panel:last-child{border-bottom:0}.gss-till-table{overflow-x:auto}.gss-till-grid{min-width:760px}.shortage-table{overflow-x:auto}.shortage-grid,.gss-shortage-total{min-width:760px}.gss-history-table{overflow-x:auto}.gss-history-grid{min-width:650px}.gss-reason-line{grid-template-columns:100px 1fr}.gss-reason-line button{grid-column:2;justify-self:end}.gss-payment-cell input{width:75px}}
+
+.gss-history-badge{margin-left:10px;font-size:10px;font-weight:800;letter-spacing:.04em}.gss-status-line{display:flex;align-items:center;justify-content:center;gap:6px}.gss-history-row{width:100%;font:inherit;color:inherit;background:#fff;border:0;border-bottom:1px solid #d5dfeb;text-align:left;padding:0;cursor:pointer}.gss-history-row:hover{background:#f2f7fc}.gss-history-row.selected{background:#e3f0fb;box-shadow:inset 3px 0 0 #52779e}.gss-history-row>span{display:block}.gss-history-row:focus-visible{outline:2px solid #52779e;outline-offset:-2px}.gss-history-row:last-child{border-bottom:0}.gss-history-row.selected .gss-status-tag{font-weight:900}
+
+.gss-header-controls select{height:32px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;padding:0 8px;font-size:13px;color:#0f172a;margin-left:4px}.gss-header-controls label{display:inline-flex;align-items:center;gap:4px}
+
+/* BUILD 016: branch-aware General Shop Status controls */
+.general-shop-status .gss-header-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.general-shop-status .gss-header-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.general-shop-status .gss-header-controls select,
+.general-shop-status .gss-header-controls input[type="date"] {
+  min-height: 34px;
+}
+.general-shop-status .gss-header-controls select {
+  min-width: 150px;
+}
+
+
+.gss-empty-state {
+  margin: 12px 0;
+  padding: 18px;
+  text-align: center;
+  border: 1px solid #d9dee7;
+  border-radius: 8px;
+  background: #fff;
+  color: #4b5563;
+}
+
+.gss-empty-state strong { color: #111827; }
+
+.gss-empty-state {
+  margin: 12px 0;
+  padding: 18px;
+  text-align: center;
+  border: 1px solid #d9dee7;
+  border-radius: 8px;
+  background: #fff;
+  color: #4b5563;
+}
+
+.gss-empty-state strong { color: #111827; }

@@ -1,0 +1,28 @@
+/* BUILD 010 FIX 1: keep cumulative Paid Off visible while allowing a new payment. */
+.general-shop-status .gss-payment-cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+.general-shop-status .gss-paid-total {
+  display: inline-block;
+  min-width: 64px;
+  text-align: right;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.general-shop-status .gss-payment-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.general-shop-status .gss-payment-entry input {
+  width: 72px;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.general-shop-status .gss-payment-entry button {
+  white-space: nowrap;
+}

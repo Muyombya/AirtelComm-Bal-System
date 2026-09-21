@@ -1,0 +1,100 @@
+
+/* BUILD 034 FIX 4 — Till Balancing context-card alignment */
+.till-balancing-page .till-context-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  align-items: stretch;
+  margin-top: 22px;
+}
+
+.till-balancing-page .till-context-grid > .context-card {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 84px;
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 7px;
+}
+
+.till-balancing-page .till-context-grid > label.context-card {
+  margin: 0;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.till-balancing-page .till-context-grid .context-card > span {
+  display: block;
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: .01em;
+}
+
+.till-balancing-page .till-context-grid .context-card > strong {
+  display: block;
+  margin: 0;
+  color: #0f172a;
+  font-size: 20px;
+  line-height: 1.2;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.till-balancing-page .till-context-grid .till-selector-card select,
+.till-balancing-page .till-context-grid .date-card input[type="date"] {
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 7px 10px;
+  border: 1px solid #94a3b8;
+  border-radius: 8px;
+  background: #fff;
+  color: #0f172a;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.till-balancing-page .till-context-grid .date-card input[type="date"] {
+  text-align: left;
+}
+
+.till-balancing-page .till-context-grid .till-selector-card select:focus,
+.till-balancing-page .till-context-grid .date-card input[type="date"]:focus {
+  outline: 2px solid #93c5fd;
+  outline-offset: 1px;
+}
+
+.till-balancing-page .till-context-grid .attendant-card strong,
+.till-balancing-page .till-context-grid .operating-capital-card strong {
+  font-size: 20px;
+}
+
+@media (max-width: 1000px) {
+  .till-balancing-page .till-context-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .till-balancing-page .till-context-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .till-balancing-page .till-context-grid > .context-card {
+    min-height: 76px;
+  }
+}

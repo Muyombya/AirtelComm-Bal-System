@@ -1,0 +1,11 @@
+import { Router } from "express";
+import { requireManager } from "../middleware/auth.js";
+import { getBranchFloatAllocations,allocateFloatToBranch,releaseFloatFromBranch,allocateBranchFloatToTill,releaseFloatFromTill } from "../controllers/branchFloatController.js";
+const router=Router();
+router.use(requireManager);
+router.get("/branches/:branchId/float-allocations",getBranchFloatAllocations);
+router.post("/branches/:branchId/float-allocations",allocateFloatToBranch);
+router.delete("/branches/:branchId/float-allocations/:terminalId",releaseFloatFromBranch);
+router.put("/branches/:branchId/float-allocations/:terminalId/till",allocateBranchFloatToTill);
+router.delete("/branches/:branchId/float-allocations/:terminalId/till",releaseFloatFromTill);
+export default router;

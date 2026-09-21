@@ -1,0 +1,13 @@
+import { Router } from "express";
+import { login, logout, me, changePassword, listUsers, createUser, updateUser, resetBranchUserPassword } from "../controllers/authController.js";
+import { requireAuth, requireManager } from "../middleware/auth.js";
+const router=Router();
+router.post("/auth/login",login);
+router.post("/auth/logout",requireAuth,logout);
+router.get("/auth/me",requireAuth,me);
+router.put("/auth/password",requireAuth,changePassword);
+router.get("/auth/users",requireAuth,requireManager,listUsers);
+router.post("/auth/users",requireAuth,requireManager,createUser);
+router.put("/auth/users/:id",requireAuth,requireManager,updateUser);
+router.put("/auth/users/:id/reset-password",requireAuth,requireManager,resetBranchUserPassword);
+export default router;

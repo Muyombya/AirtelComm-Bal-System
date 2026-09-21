@@ -1,0 +1,30 @@
+/* BUILD 036 FIX 3 — Professional General Shop Status header */
+.gss-professional-header{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(220px,320px) minmax(180px,240px);
+  align-items:center;
+  gap:24px;
+  padding:12px 16px;
+  margin:0 0 14px;
+  border-bottom:1px solid #d7dee8;
+  background:#fff;
+  box-sizing:border-box;
+}
+.gss-professional-header .gss-heading-copy{min-width:0;text-align:left}
+.gss-professional-header .gss-heading-copy h1{margin:0;color:#0f172a;font-size:24px;line-height:1.15;font-weight:800;letter-spacing:-.02em}
+.gss-professional-header .gss-heading-copy p{margin:4px 0 0;color:#64748b;font-size:12px;line-height:1.35}
+.gss-branch-identity{justify-self:center;width:100%;box-sizing:border-box;padding:5px 14px 6px;border-left:1px solid #d7dee8;border-right:1px solid #d7dee8;text-align:center}
+.gss-branch-identity span{display:block;color:#64748b;font-size:9px;line-height:1.1;font-weight:800;letter-spacing:.14em}
+.gss-branch-identity strong{display:block;margin-top:3px;color:#1d4ed8;font-size:21px;line-height:1.15;font-weight:900}
+.gss-header-date{justify-self:end;width:100%;max-width:230px}
+.gss-header-date label{display:block;color:#475569;font-size:11px;line-height:1.2;font-weight:700}
+.gss-header-date input[type="date"]{width:100%;height:36px;margin-top:4px;padding:6px 9px;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:7px;background:#fff;color:#0f172a;font-size:13px;font-weight:700}
+.gss-header-date input[type="date"]:focus{outline:2px solid #bfdbfe;outline-offset:1px}
+@media(max-width:760px){
+  .gss-professional-header{grid-template-columns:1fr;gap:9px;padding:11px 12px 12px}
+  .gss-professional-header .gss-heading-copy{text-align:center}
+  .gss-professional-header .gss-heading-copy h1{font-size:21px}
+  .gss-branch-identity{width:min(100%,360px);padding:6px 10px;border-top:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;border-left:0;border-right:0}
+  .gss-branch-identity strong{font-size:19px}
+  .gss-header-date{justify-self:center;max-width:260px}
+}

@@ -1,0 +1,323 @@
+/* BUILD 040 — Cash Book targeted visual pass 4
+   Presentation only. No business logic or data behavior changes. */
+.cash-book-page{
+  max-width:1280px;
+  margin:0 auto;
+  padding:28px 30px 42px;
+  color:#1f2328;
+}
+.cash-book-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-end;
+  gap:28px;
+  margin-bottom:22px;
+  padding-bottom:20px;
+  border-bottom:1px solid #d1d5db;
+}
+.cash-book-header h1{
+  margin:0;
+  font-size:30px;
+  line-height:1.15;
+  font-weight:800;
+  letter-spacing:-.025em;
+  color:#1f2328;
+}
+.cash-book-header p{
+  margin:7px 0 0;
+  color:#6b7280;
+  font-size:13px;
+}
+.cash-book-filters{
+  display:flex;
+  align-items:flex-end;
+  gap:12px;
+  flex-wrap:wrap;
+}
+.cash-book-filters label{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  min-width:170px;
+  color:#4b5563;
+  font-size:11px;
+  font-weight:800;
+  text-transform:uppercase;
+  letter-spacing:.045em;
+}
+.cash-book-filters select,
+.cash-book-filters input,
+.cash-book-report-controls input,
+.cash-book-ledger-controls input,
+.cash-book-ledger-controls select{
+  height:40px;
+  padding:0 11px;
+  border:1px solid #cfd4da;
+  border-radius:7px;
+  background:#fff;
+  color:#1f2328;
+  font-size:13px;
+}
+.cash-book-filters select:focus,
+.cash-book-filters input:focus,
+.cash-book-report-controls input:focus,
+.cash-book-ledger-controls input:focus,
+.cash-book-ledger-controls select:focus,
+.cash-book-opening-row input:focus,
+.cash-book-form input:focus,
+.cash-book-form select:focus{
+  outline:2px solid #d5d8dc;
+  outline-offset:1px;
+  border-color:#7b8086;
+}
+.cash-book-branch-locked{
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  min-height:40px;
+  padding:0 13px;
+  border:1px solid #d6d9dd;
+  border-radius:7px;
+  background:#f8f9fa;
+  min-width:190px;
+}
+.cash-book-branch-locked span{
+  color:#6b7280;
+  font-size:10px;
+  font-weight:800;
+  text-transform:uppercase;
+  letter-spacing:.05em;
+}
+.cash-book-branch-locked strong{font-size:13px;margin-top:2px}
+.cash-book-message,.cash-book-error{
+  margin:0 0 16px;
+  padding:11px 14px;
+  border:1px solid;
+  border-radius:7px;
+  font-size:12px;
+  font-weight:700;
+}
+.cash-book-message{background:#f0fdf4;border-color:#bbf7d0;color:#166534}
+.cash-book-error{background:#fef2f2;border-color:#fecaca;color:#991b1b}
+.cash-book-summary{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:12px;
+  margin:0 0 18px;
+}
+.cash-book-summary>div{
+  min-height:92px;
+  padding:15px 16px;
+  border:1px solid #dfe2e5;
+  border-radius:9px;
+  background:#fff;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+}
+.cash-book-summary span,
+.cash-book-month-summary span,
+.cash-book-ledger-summary span,
+.cash-book-company-total-body span{
+  color:#737980;
+  font-size:10px;
+  font-weight:800;
+  text-transform:uppercase;
+  letter-spacing:.055em;
+}
+.cash-book-summary strong{margin-top:6px;font-size:18px;line-height:1.15;font-variant-numeric:tabular-nums;color:#202428}
+.cash-book-summary .cash-book-closing{background:#f4f5f6!important;border-color:#cfd3d7!important}
+.cash-book-panel{
+  margin:0 0 18px;
+  border:1px solid #dfe2e5!important;
+  border-radius:9px;
+  background:#fff;
+  box-shadow:0 1px 2px rgb(0 0 0 / 3%);
+  overflow:hidden;
+}
+.cash-book-title{
+  padding:13px 16px;
+  background:#f5f6f7!important;
+  border-bottom:1px solid #e0e3e6!important;
+  color:#303338;
+  font-size:11px;
+  font-weight:900;
+  letter-spacing:.07em;
+}
+.cash-book-opening-row{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:10px;
+  padding:15px 16px 12px;
+}
+.cash-book-opening-row input{
+  height:42px;
+  padding:0 12px;
+  border:1px solid #cfd4da;
+  border-radius:7px;
+  font-variant-numeric:tabular-nums;
+}
+.cash-book-opening-row button,
+.cash-book-form button{
+  min-height:42px;
+  border:1px solid #303338;
+  border-radius:7px;
+  padding:0 16px;
+  background:#303338!important;
+  color:#fff!important;
+  font-size:12px;
+  font-weight:800;
+}
+.cash-book-opening-row button:hover,.cash-book-form button:hover{background:#1f2328!important}
+.cash-book-opening-row button:disabled,.cash-book-form button:disabled{opacity:.5}
+.cash-book-panel small{
+  display:block;
+  padding:0 16px 13px;
+  color:#7a8087;
+  font-size:11px;
+}
+.cash-book-form{
+  display:grid;
+  grid-template-columns:125px 150px 150px 135px minmax(200px,1fr) 82px;
+  gap:9px;
+  padding:16px;
+  align-items:center;
+}
+.cash-book-form input,.cash-book-form select{
+  min-width:0;
+  height:42px;
+  padding:0 10px;
+  border:1px solid #cfd4da;
+  border-radius:7px;
+  background:#fff;
+  font-size:13px;
+}
+.cash-book-form input[inputmode="numeric"],
+.cash-book-opening-row input{font-variant-numeric:tabular-nums}
+.cash-book-company-note{padding-top:0!important}
+.cash-book-company-total-body{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:10px;
+  padding:14px 16px;
+}
+.cash-book-company-total-body>div,
+.cash-book-month-summary>div,
+.cash-book-ledger-summary>div{
+  border:1px solid #e1e4e7!important;
+  border-radius:8px;
+  background:#f8f9fa!important;
+  padding:12px 13px;
+}
+.cash-book-company-total-body strong,
+.cash-book-month-summary strong,
+.cash-book-ledger-summary strong{display:block;margin-top:5px;font-size:15px;font-variant-numeric:tabular-nums}
+.cash-book-highlight{
+  margin:0 16px 10px;
+  padding:10px 12px;
+  border:1px solid #e1e4e7;
+  border-radius:7px;
+  background:#fafafa;
+  color:#555b61;
+  font-size:12px;
+}
+.cash-book-subtitle{
+  margin:17px 16px 7px;
+  padding:0 0 6px;
+  border-bottom:1px solid #e5e7e9;
+  color:#555b61;
+  font-size:10px;
+  font-weight:900;
+  letter-spacing:.065em;
+}
+.cash-book-report-controls,
+.cash-book-ledger-controls{
+  display:flex;
+  justify-content:flex-end;
+  gap:10px;
+  padding:12px 16px;
+  border-bottom:1px solid #e6e8ea;
+  background:#fff;
+}
+.cash-book-report-controls label,
+.cash-book-ledger-controls label{
+  display:flex;
+  align-items:center;
+  gap:7px;
+  color:#555b61;
+  font-size:11px;
+  font-weight:800;
+}
+.cash-book-report-controls input,.cash-book-ledger-controls input,.cash-book-ledger-controls select{height:36px}
+.cash-book-month-summary,.cash-book-ledger-summary{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:10px;
+  padding:14px 16px 4px;
+}
+.cash-book-ledger-summary{grid-template-columns:repeat(4,minmax(0,1fr));padding-bottom:12px}
+.cash-book-ledger-summary .cash-book-combined{background:#eef0f2!important;border-color:#cfd3d7!important}
+.cash-book-table{overflow-x:auto}
+.cash-book-row{
+  display:grid;
+  gap:10px;
+  align-items:center;
+  min-height:40px;
+  padding:8px 16px;
+  border-top:1px solid #eef0f2;
+  color:#3f444a;
+  font-size:12px;
+}
+.cash-book-row:hover:not(.cash-book-head){background:#fafafa}
+.cash-book-head{
+  min-height:36px;
+  background:#f5f6f7!important;
+  color:#6b7178!important;
+  border-top:1px solid #e4e6e8;
+  font-size:9px;
+  font-weight:900;
+  text-transform:uppercase;
+  letter-spacing:.055em;
+}
+.cash-book-row strong{color:#202428;font-variant-numeric:tabular-nums}
+.cash-book-expense-ledger .cash-book-row{grid-template-columns:95px 155px 135px minmax(200px,1fr) 135px}
+.cash-book-category-table .cash-book-row,.cash-book-daily-table .cash-book-row{grid-template-columns:1fr 75px 150px}
+.cash-book-branch-row{grid-template-columns:1fr 80px 160px!important}
+.cash-book-branch-row span:nth-child(2),.cash-book-category-table .cash-book-row span:nth-child(2),.cash-book-daily-table .cash-book-row span:nth-child(2){text-align:center}
+.cash-book-branch-row strong,.cash-book-category-table .cash-book-row strong,.cash-book-daily-table .cash-book-row strong{text-align:right}
+.cash-book-empty{padding:24px 16px;text-align:center;color:#7a8087;font-size:12px}
+.cash-book-empty-state{margin-top:0}
+.cash-book-empty-state .cash-book-empty{padding:30px 18px}
+.cash-book-empty-state .cash-book-empty strong{color:#303338}
+.cash-book-company-row{font-weight:800;background:#fafafa}
+.cash-book-ledger-note{margin:0;padding:10px 16px;font-size:11px;border-top:1px solid #e5e7e9;color:#7a8087}
+@media(max-width:1050px){
+  .cash-book-form{grid-template-columns:1fr 1fr 1fr}
+  .cash-book-form button{grid-column:auto}
+  .cash-book-summary{grid-template-columns:repeat(2,1fr)}
+}
+@media(max-width:800px){
+  .cash-book-page{padding:22px 18px 34px}
+  .cash-book-header{align-items:stretch;flex-direction:column;gap:16px}
+  .cash-book-filters{align-items:stretch}
+  .cash-book-filters label{flex:1;min-width:150px}
+  .cash-book-company-total-body,.cash-book-month-summary{grid-template-columns:1fr}
+  .cash-book-ledger-summary{grid-template-columns:1fr 1fr}
+  .cash-book-report-controls,.cash-book-ledger-controls{justify-content:stretch}
+}
+@media(max-width:600px){
+  .cash-book-page{padding:16px 12px 28px}
+  .cash-book-header h1{font-size:25px}
+  .cash-book-summary{gap:8px}
+  .cash-book-summary>div{min-height:82px;padding:12px}
+  .cash-book-summary strong{font-size:15px}
+  .cash-book-opening-row{grid-template-columns:1fr}
+  .cash-book-form{grid-template-columns:1fr!important}
+  .cash-book-form button{width:100%}
+  .cash-book-report-controls,.cash-book-ledger-controls{flex-direction:column;align-items:stretch}
+  .cash-book-report-controls label,.cash-book-ledger-controls label{justify-content:space-between}
+  .cash-book-ledger-summary{grid-template-columns:1fr}
+  .cash-book-row{min-width:620px}
+  .cash-book-expense-ledger .cash-book-row{min-width:760px}
+  .cash-book-category-table .cash-book-row,.cash-book-daily-table .cash-book-row{min-width:420px}
+}

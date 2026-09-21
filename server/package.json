@@ -1,0 +1,17 @@
+{
+  "name": "airtelcomm-bal-system-server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/app.js",
+    "start": "node src/app.js",
+    "db:test": "node -e \"import(\"./src/config/database.js\").then(async ({testDatabaseConnection,pool})=>{console.log(await testDatabaseConnection());await pool.end()}).catch(async e=>{console.error(e.message);process.exit(1)})\""
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.1",
+    "express": "^5.1.0",
+    "pg": "^8.16.3"
+  }
+}
