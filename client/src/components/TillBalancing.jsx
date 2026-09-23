@@ -6,6 +6,7 @@ import {
   getTillBalances,
   getTillBalancingContext,
   getTills,
+  getCurrentUser,
   reorderTillTerminals,
 } from "../services/api";
 
@@ -63,23 +64,63 @@ export default function TillBalancing({ user }) {
   const [historyError, setHistoryError] = useState("");
 
   async function loadTills() {
-    if (user?.role === "BRANCH_USER") {
-      if (!user.till_id) {
+    let activeUser = user;
+
+    if (
+      !activeUser ||
+      (activeUser.role === "SUPERVISOR" && !activeUser.branch_id)
+    ) {
+      activeUser = (await getCurrentUser())?.user || null;
+    }
+
+    if (!activeUser) {
+      setTills([]);
+      setTillId("");
+      setError("Unable to determine the current user.");
+      return;
+    }
+
+    if (activeUser.role === "BRANCH_USER") {
+      if (!activeUser.till_id) {
         setTills([]);
         setTillId("");
         setError("No Till is assigned to this Branch User. Please contact the Manager.");
         return;
       }
-      setTills([{ id: Number(user.till_id), name: user.till_name || "Assigned Till", branch_id: user.branch_id, status: "ACTIVE" }]);
-      setTillId(String(user.till_id));
+
+      setTills([{
+        id: Number(activeUser.till_id),
+        name: activeUser.till_name || "Assigned Till",
+        branch_id: activeUser.branch_id,
+        status: "ACTIVE"
+      }]);
+      setTillId(String(activeUser.till_id));
       return;
     }
-    const data = user?.role === "SUPERVISOR"
-      ? await getTills(user.branch_id)
+
+    const data = activeUser.role === "SUPERVISOR"
+      ? await getTills(activeUser.branch_id)
       : await getTills();
-    const activeTills = data.filter((till) => till.status === "ACTIVE");
+
+    const activeTills = data.filter((till) => {
+      if (till.status !== "ACTIVE") return false;
+      if (activeUser.role === "SUPERVISOR") {
+        return Number(till.branch_id) === Number(activeUser.branch_id);
+      }
+      return true;
+    });
+
     setTills(activeTills);
-    if (!tillId && activeTills.length) setTillId(String(activeTills[0].id));
+
+    if (activeTills.length) {
+      setTillId((current) =>
+        current && activeTills.some((till) => String(till.id) === String(current))
+          ? current
+          : String(activeTills[0].id)
+      );
+    } else {
+      setTillId("");
+    }
   }
 
   async function loadContext(selectedId) {
@@ -120,7 +161,7 @@ export default function TillBalancing({ user }) {
 
   useEffect(() => {
     loadTills().catch((err) => setError(err.message));
-  }, []);
+  }, [user?.role, user?.branch_id, user?.till_id, user?.till_name]);
 
   useEffect(() => {
     if (!tillId) return;
