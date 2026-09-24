@@ -98,3 +98,49 @@
     min-height: 76px;
   }
 }
+
+
+/* BUILD 040 — Recorded Till Balance status tint */
+.till-balancing-page.till-status-short {
+  background: #fff7f7;
+}
+
+.till-balancing-page.till-status-excess {
+  background: #f5fbf7;
+}
+
+.till-balancing-page.till-status-short .context-card,
+.till-balancing-page.till-status-short .panel,
+.till-balancing-page.till-status-short .history-panel {
+  background: #fffafa;
+  border-color: #ead1d1;
+}
+
+.till-balancing-page.till-status-excess .context-card,
+.till-balancing-page.till-status-excess .panel,
+.till-balancing-page.till-status-excess .history-panel {
+  background: #f9fcfa;
+  border-color: #cfe3d5;
+}
+
+.till-balancing-page.till-status-short .result-card.short {
+  background: #fbeaea;
+  border-color: #e4bcbc;
+}
+
+.till-balancing-page.till-status-excess .result-card.excess {
+  background: #e8f6ec;
+  border-color: #b9d9c2;
+}
+
+.till-balancing-page.till-status-short .history-row:not(.history-head),
+.till-balancing-page.till-status-excess .history-row:not(.history-head) {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .till-balancing-page.till-status-short,
+  .till-balancing-page.till-status-excess {
+    transition: background-color 180ms ease;
+  }
+}

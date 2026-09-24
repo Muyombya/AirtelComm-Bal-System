@@ -6,7 +6,6 @@ import {
   getTillBalances,
   getTillBalancingContext,
   getTills,
-  getCurrentUser,
   reorderTillTerminals,
 } from "../services/api";
 
@@ -62,65 +61,27 @@ export default function TillBalancing({ user }) {
   const [selectedHistory, setSelectedHistory] = useState(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState("");
+  const [recordedBalanceStatus, setRecordedBalanceStatus] = useState("");
+  const [dailyTransactionValidationOpen, setDailyTransactionValidationOpen] = useState(false);
 
   async function loadTills() {
-    let activeUser = user;
-
-    if (
-      !activeUser ||
-      (activeUser.role === "SUPERVISOR" && !activeUser.branch_id)
-    ) {
-      activeUser = (await getCurrentUser())?.user || null;
-    }
-
-    if (!activeUser) {
-      setTills([]);
-      setTillId("");
-      setError("Unable to determine the current user.");
-      return;
-    }
-
-    if (activeUser.role === "BRANCH_USER") {
-      if (!activeUser.till_id) {
+    if (user?.role === "BRANCH_USER") {
+      if (!user.till_id) {
         setTills([]);
         setTillId("");
         setError("No Till is assigned to this Branch User. Please contact the Manager.");
         return;
       }
-
-      setTills([{
-        id: Number(activeUser.till_id),
-        name: activeUser.till_name || "Assigned Till",
-        branch_id: activeUser.branch_id,
-        status: "ACTIVE"
-      }]);
-      setTillId(String(activeUser.till_id));
+      setTills([{ id: Number(user.till_id), name: user.till_name || "Assigned Till", branch_id: user.branch_id, status: "ACTIVE" }]);
+      setTillId(String(user.till_id));
       return;
     }
-
-    const data = activeUser.role === "SUPERVISOR"
-      ? await getTills(activeUser.branch_id)
+    const data = user?.role === "SUPERVISOR"
+      ? await getTills(user.branch_id)
       : await getTills();
-
-    const activeTills = data.filter((till) => {
-      if (till.status !== "ACTIVE") return false;
-      if (activeUser.role === "SUPERVISOR") {
-        return Number(till.branch_id) === Number(activeUser.branch_id);
-      }
-      return true;
-    });
-
+    const activeTills = data.filter((till) => till.status === "ACTIVE");
     setTills(activeTills);
-
-    if (activeTills.length) {
-      setTillId((current) =>
-        current && activeTills.some((till) => String(till.id) === String(current))
-          ? current
-          : String(activeTills[0].id)
-      );
-    } else {
-      setTillId("");
-    }
+    if (!tillId && activeTills.length) setTillId(String(activeTills[0].id));
   }
 
   async function loadContext(selectedId) {
@@ -131,6 +92,11 @@ export default function TillBalancing({ user }) {
     ]);
     setContext(nextContext);
     setHistory(nextHistory);
+
+    const latestBalanceForDate = nextHistory.find(
+      (item) => String(item.business_date).slice(0, 10) === businessDate
+    );
+    setRecordedBalanceStatus(latestBalanceForDate?.status || "");
 
     if (user?.role === "BRANCH_USER") {
       const assignedTillName =
@@ -161,7 +127,7 @@ export default function TillBalancing({ user }) {
 
   useEffect(() => {
     loadTills().catch((err) => setError(err.message));
-  }, [user?.role, user?.branch_id, user?.till_id, user?.till_name]);
+  }, []);
 
   useEffect(() => {
     if (!tillId) return;
@@ -262,6 +228,19 @@ export default function TillBalancing({ user }) {
     event.preventDefault();
     setMessage("");
     setError("");
+
+    // Daily Transactions require at least two non-zero entries before
+    // a balance can be recorded. Other displayed terminals may legitimately
+    // remain at zero when their transactions are not recorded for the day.
+    const nonZeroDailyTransactions = visibleDailyTransactions.filter(
+      (terminal) => Number(transactionCounts[terminal.terminal_id] || 0) > 0
+    );
+
+    if (nonZeroDailyTransactions.length < 2) {
+      setDailyTransactionValidationOpen(true);
+      return;
+    }
+
     setSaving(true);
     try {
       const cashItems = NOTE_DENOMINATIONS.map((denomination) => ({
@@ -294,6 +273,7 @@ export default function TillBalancing({ user }) {
         })),
       });
       setMessage(`Balance recorded successfully — ${result.status}.`);
+      setRecordedBalanceStatus(result.status);
       // Reset every user-entered balancing field to zero after a successful record.
       // Keep the saved database values intact; only the current entry form is reset.
       const zeroCash = Object.fromEntries(
@@ -341,7 +321,7 @@ export default function TillBalancing({ user }) {
   }
 
   return (
-    <main className="app-shell till-balancing-page">
+    <main className={`app-shell till-balancing-page ${recordedBalanceStatus ? `till-status-${recordedBalanceStatus.toLowerCase()}` : ""}`}>
       <header className="page-header">
         <div>
           <div className="eyebrow">BUILD 003</div>
@@ -506,6 +486,40 @@ export default function TillBalancing({ user }) {
           </div>)}
         </div> : <div className="empty-state">No balancing events recorded for this Till yet.</div>}
       </section>
+
+      {dailyTransactionValidationOpen && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="daily-transaction-validation-title">
+          <div className="history-modal validation-modal">
+            <div className="modal-header">
+              <div>
+                <div className="eyebrow">BALANCE VALIDATION</div>
+                <h2 id="daily-transaction-validation-title">Daily Transactions Required</h2>
+              </div>
+              <button
+                className="modal-close"
+                type="button"
+                onClick={() => setDailyTransactionValidationOpen(false)}
+                aria-label="Close Daily Transactions validation"
+              >
+                ×
+              </button>
+            </div>
+            <p>Please enter Daily Transactions for at least two terminals before recording the balance.</p>
+            <div className="modal-actions">
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => {
+                  setDailyTransactionValidationOpen(false);
+                  document.querySelector(".transaction-panel")?.scrollIntoView({ behavior: "smooth", block: "center" });
+                }}
+              >
+                OK — Enter Transactions
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {historyLoading && <div className="modal-backdrop"><div className="history-modal"><p>Loading balance details...</p></div></div>}
       {historyError && <div className="modal-backdrop"><div className="history-modal"><h3>Unable to open balance</h3><p>{historyError}</p><button className="secondary-button" type="button" onClick={() => setHistoryError("")}>Close</button></div></div>}
