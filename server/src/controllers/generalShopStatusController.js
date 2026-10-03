@@ -96,49 +96,63 @@ export async function getTillTransactionCounts(req, res, next) {
 
 async function getShortageSummary(client, branchId, date) {
   const result = await client.query(
-    `WITH shortage_added AS (
-       SELECT tb.employee_id, e.name AS employee_name,
-              COALESCE(SUM(CASE WHEN tb.difference < 0 THEN -tb.difference ELSE 0 END),0)::NUMERIC(18,2) AS added
-       FROM till_balances tb
-       JOIN tills t ON t.id=tb.till_id
-       JOIN employees e ON e.id=tb.employee_id
-       WHERE t.branch_id=$1 AND tb.business_date=$2
-       GROUP BY tb.employee_id,e.name
+    `WITH shortage_events AS (
+       SELECT p.till_balance_id,
+              p.employee_id,
+              p.employee_name,
+              p.till_name,
+              p.business_date,
+              p.shortage,
+              COALESCE(SUM(a.amount) FILTER (WHERE bsp.payment_date <= $2),0)::NUMERIC(18,2) AS recovered
+       FROM till_shortage_event_positions p
+       LEFT JOIN till_shortage_settlement_allocations a
+         ON a.till_balance_id=p.till_balance_id
+       LEFT JOIN branch_shortage_payments bsp
+         ON bsp.id=a.payment_id
+       WHERE p.branch_id=$1
+         AND p.business_date <= $2
+       GROUP BY p.till_balance_id,p.employee_id,p.employee_name,p.till_name,p.business_date,p.shortage
      ),
-     shortage_total AS (
-       SELECT tb.employee_id,
-              COALESCE(SUM(CASE WHEN tb.difference < 0 THEN -tb.difference ELSE 0 END),0)::NUMERIC(18,2) AS amount_owed
-       FROM till_balances tb
-       JOIN tills t ON t.id=tb.till_id
-       WHERE t.branch_id=$1 AND tb.business_date <= $2
-       GROUP BY tb.employee_id
+     people AS (
+       SELECT employee_id FROM shortage_events
+       UNION
+       SELECT employee_id FROM branch_shortage_payments
+       WHERE branch_id=$1 AND payment_date <= $2
      ),
-     payments_to_date AS (
+     shortage_totals AS (
        SELECT employee_id,
-              COALESCE(SUM(amount),0)::NUMERIC(18,2) AS paid_to_date,
-              COALESCE(SUM(amount) FILTER (WHERE payment_date=$2),0)::NUMERIC(18,2) AS paid_off_today
+              STRING_AGG(DISTINCT till_name, ', ' ORDER BY till_name) AS till_names,
+              COALESCE(SUM(shortage),0)::NUMERIC(18,2) AS total_incurred,
+              COALESCE(SUM(shortage) FILTER (WHERE business_date = $2),0)::NUMERIC(18,2) AS new_shortage,
+              COALESCE(SUM(recovered),0)::NUMERIC(18,2) AS recovered_to_date
+       FROM shortage_events
+       GROUP BY employee_id
+     ),
+     payments AS (
+       SELECT employee_id,
+              COALESCE(SUM(amount) FILTER (WHERE payment_date < $2),0)::NUMERIC(18,2) AS payments_before,
+              COALESCE(SUM(amount) FILTER (WHERE payment_date = $2),0)::NUMERIC(18,2) AS payments_today,
+              COALESCE(SUM(amount),0)::NUMERIC(18,2) AS payments_to_date
        FROM branch_shortage_payments
        WHERE branch_id=$1 AND payment_date <= $2
        GROUP BY employee_id
-     ),
-     people AS (
-       SELECT employee_id FROM shortage_total
-       UNION SELECT employee_id FROM payments_to_date
-       UNION SELECT employee_id FROM shortage_added
      )
-     SELECT p.employee_id, e.name AS employee_name,
-            COALESCE(sa.added,0)::NUMERIC(18,2) AS added,
-            GREATEST(COALESCE(st.amount_owed,0)-COALESCE(pt.paid_to_date,0),0)::NUMERIC(18,2) AS amount_owed,
-            COALESCE(pt.paid_off_today,0)::NUMERIC(18,2) AS paid_off,
-            GREATEST(COALESCE(st.amount_owed,0)-COALESCE(pt.paid_to_date,0),0)::NUMERIC(18,2) AS balance
+     SELECT p.employee_id,
+            e.name AS employee_name,
+            COALESCE(st.till_names,'') AS till_names,
+            COALESCE(st.total_incurred,0)::NUMERIC(18,2) AS total_incurred,
+            COALESCE(st.new_shortage,0)::NUMERIC(18,2) AS new_shortage,
+            COALESCE(st.recovered_to_date,0)::NUMERIC(18,2) AS recovered_to_date,
+            COALESCE(pt.payments_before,0)::NUMERIC(18,2) AS payments_before,
+            COALESCE(pt.payments_today,0)::NUMERIC(18,2) AS payments_today,
+            GREATEST(COALESCE(st.total_incurred,0)-COALESCE(st.recovered_to_date,0),0)::NUMERIC(18,2) AS balance
      FROM people p
      JOIN employees e ON e.id=p.employee_id
-     LEFT JOIN shortage_added sa ON sa.employee_id=p.employee_id
-     LEFT JOIN shortage_total st ON st.employee_id=p.employee_id
-     LEFT JOIN payments_to_date pt ON pt.employee_id=p.employee_id
-     WHERE COALESCE(st.amount_owed,0)-COALESCE(pt.paid_to_date,0) > 0
-        OR COALESCE(sa.added,0) > 0
-        OR COALESCE(pt.paid_off_today,0) > 0
+     LEFT JOIN shortage_totals st ON st.employee_id=p.employee_id
+     LEFT JOIN payments pt ON pt.employee_id=p.employee_id
+     WHERE GREATEST(COALESCE(st.total_incurred,0)-COALESCE(st.recovered_to_date,0),0) > 0
+        OR COALESCE(st.new_shortage,0) > 0
+        OR COALESCE(pt.payments_today,0) > 0
      ORDER BY e.name`,
     [branchId, date]
   );
@@ -146,10 +160,13 @@ async function getShortageSummary(client, branchId, date) {
   return result.rows.map(r => ({
     employeeId: Number(r.employee_id),
     name: r.employee_name,
-    added: Number(r.added),
-    amountOwed: Number(r.amount_owed),
-    paidOff: Number(r.paid_off),
-    balance: Number(r.balance),
+    tillName: r.till_names || "—",
+    totalIncurred: Number(r.total_incurred || 0),
+    newShortage: Number(r.new_shortage || 0),
+    recoveredToDate: Number(r.recovered_to_date || 0),
+    paymentsBefore: Number(r.payments_before || 0),
+    paymentsToday: Number(r.payments_today || 0),
+    balance: Number(r.balance || 0),
   }));
 }
 
@@ -205,8 +222,85 @@ export async function getGeneralShopStatus(req, res, next) {
     );
 
     const shortageRows = await getShortageSummary(pool, branchId, date);
+    const shortagePayments = await pool.query(
+      `SELECT bsp.id, bsp.till_id, t.name AS till_name, bsp.employee_id, e.name AS employee_name, bsp.amount, bsp.payment_date, bsp.note, bsp.created_at
+       FROM branch_shortage_payments bsp
+       JOIN employees e ON e.id=bsp.employee_id
+       LEFT JOIN tills t ON t.id=bsp.till_id
+       WHERE bsp.branch_id=$1 AND bsp.payment_date <= $2
+       ORDER BY bsp.payment_date DESC, bsp.id DESC
+       LIMIT 100`, [branchId,date]
+    );
+    // Cash Book Position must mirror the Cash Book module exactly.
+    // cash_book_accounts.opening_balance is the branch's original/base opening
+    // balance. For a selected business date, the opening balance is the prior
+    // cumulative closing balance, i.e. base opening + all prior top-ups - all
+    // prior expenses. The selected day's movement is then applied to produce
+    // the closing balance. This prevents General Shop Status from resetting
+    // the Cash Book opening balance to the original account opening each day.
+    const cashBookResult = await pool.query(
+      `WITH account AS (
+         SELECT COALESCE(opening_balance,0)::NUMERIC(18,2) AS base_opening_balance
+         FROM cash_book_accounts
+         WHERE branch_id=$1
+       ),
+       prior AS (
+         SELECT
+           COALESCE(SUM(cbe.amount) FILTER (WHERE cbe.entry_type='TOP_UP'),0)::NUMERIC(18,2) AS prior_top_ups,
+           COALESCE(SUM(cbe.amount) FILTER (WHERE cbe.entry_type='EXPENSE'),0)::NUMERIC(18,2) AS prior_expenses
+         FROM cash_book_entries cbe
+         WHERE cbe.branch_id=$1 AND cbe.business_date < $2
+       ),
+       selected_day AS (
+         SELECT
+           COALESCE(SUM(cbe.amount) FILTER (WHERE cbe.entry_type='TOP_UP'),0)::NUMERIC(18,2) AS daily_top_ups,
+           COALESCE(SUM(cbe.amount) FILTER (WHERE cbe.entry_type='EXPENSE'),0)::NUMERIC(18,2) AS daily_expenses,
+           COUNT(*)::INT AS daily_entries
+         FROM cash_book_entries cbe
+         WHERE cbe.branch_id=$1 AND cbe.business_date = $2
+       ),
+       cumulative AS (
+         SELECT
+           COALESCE(SUM(cbe.amount) FILTER (WHERE cbe.entry_type='TOP_UP'),0)::NUMERIC(18,2) AS total_top_ups,
+           COALESCE(SUM(cbe.amount) FILTER (WHERE cbe.entry_type='EXPENSE'),0)::NUMERIC(18,2) AS total_expenses
+         FROM cash_book_entries cbe
+         WHERE cbe.branch_id=$1 AND cbe.business_date <= $2
+       )
+       SELECT
+         a.base_opening_balance,
+         (a.base_opening_balance + p.prior_top_ups - p.prior_expenses)::NUMERIC(18,2) AS opening_balance,
+         d.daily_top_ups,
+         d.daily_expenses,
+         c.total_top_ups,
+         c.total_expenses,
+         d.daily_entries,
+         (a.base_opening_balance + c.total_top_ups - c.total_expenses)::NUMERIC(18,2) AS closing_balance
+       FROM account a
+       CROSS JOIN prior p
+       CROSS JOIN selected_day d
+       CROSS JOIN cumulative c`,
+      [branchId, date]
+    );
+    const cashBookExpensesResult = await pool.query(
+      `SELECT id, category, description, amount, reference, entered_at
+       FROM cash_book_entries
+       WHERE branch_id=$1
+         AND entry_type='EXPENSE'
+         AND business_date=$2
+       ORDER BY entered_at ASC, id ASC`,
+      [branchId, date]
+    );
+    const cashBookRow = cashBookResult.rows[0] || {};
+    const cashBookOpeningBalance = Number(cashBookRow.opening_balance || 0);
+    const cashBookDailyTopUps = Number(cashBookRow.daily_top_ups || 0);
+    const cashBookDailyExpenses = Number(cashBookRow.daily_expenses || 0);
+    const cashBookTotalTopUps = Number(cashBookRow.total_top_ups || 0);
+    const cashBookTotalExpenses = Number(cashBookRow.total_expenses || 0);
+    const cashBookClosingBalance = Number(cashBookRow.closing_balance || 0);
+
     const totalShortageBalance = shortageRows.reduce((s, r) => s + Number(r.balance || 0), 0);
-    const totalShortagePaid = shortageRows.reduce((s, r) => s + Number(r.paidOff || 0), 0);
+    const totalShortageAdded = shortageRows.reduce((s, r) => s + Number(r.newShortage || 0), 0);
+    const totalShortagePaid = shortageRows.reduce((s, r) => s + Number(r.paymentsToday || 0), 0);
 
     const latestByTill = Object.fromEntries(balances.rows.map(r => [r.till_id,r]));
 
@@ -218,6 +312,7 @@ export async function getGeneralShopStatus(req, res, next) {
     const totalFloat = balances.rows.reduce((s,r)=>s+Number(r.total_float||0),0);
     const branchCapital = totalCash + totalFloat;
     const difference = branchCapital - branchOperatingCapital;
+    const effectiveWorkingCapital = Math.max(branchOperatingCapital - totalShortageBalance, 0);
     const adjustedBranchCapital = branchCapital + totalShortageBalance + totalShortagePaid;
     const adjustedDifference = adjustedBranchCapital - branchOperatingCapital;
     const complete = balances.rows.length === tills.rows.length;
@@ -286,7 +381,7 @@ export async function getGeneralShopStatus(req, res, next) {
     for (const row of shortageRows) {
       tillShortagePosition[row.employeeId] = {
         outstanding: Number(row.balance || 0),
-        recovered: Number(row.paidOff || 0),
+        recovered: Number(row.paymentsToday || 0),
       };
     }
 
@@ -302,9 +397,30 @@ export async function getGeneralShopStatus(req, res, next) {
       }),
       positions: positions.rows.map(r=>({terminal_name:r.terminal_name,amount:Number(r.amount)})),
       dailyTransactions: tx.rows.map(r=>({ terminal_id:r.terminal_id, terminal_name:r.terminal_name, transactionCount:Number(r.transaction_count||0) })),
-      accessoriesCount: Number(entry.rows[0]?.accessories_count||0), reason: entry.rows[0]?.reason || "",
+      accessoriesCount: Number(entry.rows[0]?.accessories_count||0),
+      imbalanceRemark: entry.rows[0]?.reason || "",
+      reason: entry.rows[0]?.reason || "",
+      cashBook: {
+        openingBalance: cashBookOpeningBalance,
+        dailyTopUps: cashBookDailyTopUps,
+        dailyExpenses: cashBookDailyExpenses,
+        dailyNetMovement: cashBookDailyTopUps - cashBookDailyExpenses,
+        totalTopUps: cashBookTotalTopUps,
+        totalExpenses: cashBookTotalExpenses,
+        closingBalance: cashBookClosingBalance,
+        dailyEntries: Number(cashBookRow.daily_entries || 0),
+        expenses: cashBookExpensesResult.rows.map(r => ({
+          id: Number(r.id),
+          category: r.category || "Other",
+          description: r.description || "",
+          amount: Number(r.amount || 0),
+          reference: r.reference || "",
+          enteredAt: r.entered_at,
+        })),
+      },
       shortageCounter: shortageRows,
-      totals:{branchOperatingCapital,totalCash,totalFloat,branchCapital,difference,totalShortageBalance,totalShortagePaid,adjustedBranchCapital,adjustedDifference,status,adjustedStatus},
+      shortagePayments: shortagePayments.rows.map(r => ({ id:Number(r.id), tillId:r.till_id == null ? null : Number(r.till_id), tillName:r.till_name || "", employeeId:Number(r.employee_id), employeeName:r.employee_name, amount:Number(r.amount), paymentDate:r.payment_date, note:r.note || "", createdAt:r.created_at })),
+      totals:{branchOperatingCapital,totalCash,totalFloat,branchCapital,difference,totalShortageBalance,totalShortageAdded,totalShortagePaid,effectiveWorkingCapital,adjustedBranchCapital,adjustedDifference,status,adjustedStatus},
       balancedTillCount:balances.rows.length,totalTillCount:tills.rows.length,history:history.rows
     });
   } catch(e){ next(e); }
@@ -312,7 +428,22 @@ export async function getGeneralShopStatus(req, res, next) {
 
 export async function saveGeneralShopStatus(req,res,next) {
   try {
-    const branchId=positiveId(req.body.branchId||1,"Branch ID");
+    const role = String(req.user?.role || "").toUpperCase();
+    if (role !== "SUPERVISOR" && role !== "MANAGER") {
+      const e = new Error("Only a Supervisor or Manager can enter Supervisor Daily Inputs.");
+      e.statusCode = 403;
+      throw e;
+    }
+
+    const requestedBranchId = positiveId(req.body.branchId || req.user?.branch_id, "Branch ID");
+    const assignedBranchId = req.user?.branch_id == null ? null : Number(req.user.branch_id);
+    if (role === "SUPERVISOR" && (!assignedBranchId || requestedBranchId !== assignedBranchId)) {
+      const e = new Error("A Supervisor can only enter Daily Inputs for the assigned branch.");
+      e.statusCode = 403;
+      throw e;
+    }
+
+    const branchId = requestedBranchId;
     const date=businessDate(req.body.businessDate);
     const accessoriesCount=count(req.body.accessoriesCount||0,"Accessories");
     const reason=String(req.body.reason||"").trim();
@@ -344,6 +475,7 @@ export async function recordShortagePayment(req, res, next) {
   try {
     const branchId = positiveId(req.body.branchId || 1, "Branch ID");
     const employeeId = positiveId(req.body.employeeId, "Employee ID");
+    const tillId = positiveId(req.body.tillId, "Till ID");
     const paymentDate = businessDate(req.body.paymentDate || new Date().toISOString().slice(0,10));
     const paymentAmount = amount(req.body.amount, "Payment amount");
     const note = String(req.body.note || "").trim();
@@ -351,25 +483,33 @@ export async function recordShortagePayment(req, res, next) {
     await client.query("BEGIN");
     const employee = await client.query(
       `SELECT e.id,e.name FROM employees e JOIN till_assignments ta ON ta.employee_id=e.id
-       JOIN tills t ON t.id=ta.till_id WHERE e.id=$1 AND t.branch_id=$2 LIMIT 1 FOR UPDATE`, [employeeId, branchId]
+       JOIN tills t ON t.id=ta.till_id WHERE e.id=$1 AND t.branch_id=$2 AND t.id=$3 LIMIT 1 FOR UPDATE`, [employeeId, branchId, tillId]
     );
     if (!employee.rowCount) { const e=new Error("Employee is not assigned to a Till in this branch."); e.statusCode=404; throw e; }
 
     const owedResult = await client.query(
-      `SELECT COALESCE(SUM(CASE WHEN tb.difference < 0 THEN -tb.difference ELSE 0 END),0) AS amount_owed
-       FROM till_balances tb JOIN tills t ON t.id=tb.till_id
-       WHERE t.branch_id=$1 AND tb.employee_id=$2 AND tb.business_date <= $3`, [branchId,employeeId,paymentDate]
+      `WITH latest_balances AS (
+         SELECT DISTINCT ON (tb.till_id, tb.business_date)
+                tb.till_id, tb.business_date, tb.employee_id, tb.difference
+         FROM till_balances tb
+         JOIN tills t ON t.id=tb.till_id
+         WHERE t.branch_id=$1 AND t.id=$4 AND tb.business_date <= $3
+         ORDER BY tb.till_id, tb.business_date, tb.balanced_at DESC, tb.id DESC
+       )
+       SELECT COALESCE(SUM(CASE WHEN difference < 0 THEN -difference ELSE 0 END),0) AS amount_owed
+       FROM latest_balances
+       WHERE employee_id=$2`, [branchId,employeeId,paymentDate,tillId]
     );
     const paidResult = await client.query(
       `SELECT COALESCE(SUM(amount),0) AS paid_off FROM branch_shortage_payments
-       WHERE branch_id=$1 AND employee_id=$2 AND payment_date <= $3`, [branchId,employeeId,paymentDate]
+       WHERE till_id=$1 AND branch_id=$2 AND employee_id=$3 AND payment_date <= $4`, [tillId,branchId,employeeId,paymentDate]
     );
     const balance = Number(owedResult.rows[0].amount_owed||0)-Number(paidResult.rows[0].paid_off||0);
     if (paymentAmount > balance) { const e=new Error(`Payment exceeds the outstanding shortage balance of UGX ${balance.toLocaleString("en-UG")}.`); e.statusCode=400; throw e; }
 
     const inserted = await client.query(
-      `INSERT INTO branch_shortage_payments(branch_id,employee_id,amount,payment_date,note)
-       VALUES($1,$2,$3,$4,$5) RETURNING id,amount,payment_date,note,created_at`, [branchId,employeeId,paymentAmount,paymentDate,note||null]
+      `INSERT INTO branch_shortage_payments(till_id,branch_id,employee_id,amount,payment_date,note)
+       VALUES($1,$2,$3,$4,$5,$6) RETURNING id,till_id,amount,payment_date,note,created_at`, [tillId,branchId,employeeId,paymentAmount,paymentDate,note||null]
     );
     await client.query("COMMIT");
     res.status(201).json({message:"Shortage payment recorded successfully.",payment:inserted.rows[0]});

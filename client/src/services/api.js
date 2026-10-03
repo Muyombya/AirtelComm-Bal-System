@@ -41,6 +41,10 @@ export function unassignTerminalFromTill(tillId, terminalId) { return request(`/
 export function reorderTillTerminals(tillId, terminalIds) { return request(`/tills/${tillId}/terminals/order`, { method: "PUT", body: JSON.stringify({ terminalIds: terminalIds.map(Number) }) }); }
 export function getTillBalancingContext(tillId) { return request(`/tills/${tillId}/balancing-context`); }
 export function createTillBalance(payload) { return request("/till-balances", { method: "POST", body: JSON.stringify(payload) }); }
+export function getTillShortagePosition(tillId, businessDate) { const p=new URLSearchParams(); if(businessDate)p.set("businessDate",businessDate); const q=p.toString(); return request(`/tills/${tillId}/shortage-position${q?`?${q}`:""}`); }
+export function recordTillShortageSettlement(tillId, tillBalanceId, amount, paymentDate, note="") {
+  return request(`/tills/${tillId}/shortage-settlements`, { method:"POST", body:JSON.stringify({ tillBalanceId:Number(tillBalanceId), amount:Number(amount), paymentDate, note }) });
+}
 export function getTillBalances(tillId, businessDate) { const p=new URLSearchParams(); if(businessDate)p.set("businessDate",businessDate); const q=p.toString(); return request(`/tills/${tillId}/balances${q?`?${q}`:""}`); }
 export function getTillBalanceDetails(balanceId) { return request(`/till-balances/${balanceId}`); }
 export function getTillTransactionCounts(tillId, businessDate) { const p=new URLSearchParams(); if(businessDate)p.set("businessDate",businessDate); const q=p.toString(); return request(`/tills/${tillId}/transaction-counts${q?`?${q}`:""}`); }
@@ -94,3 +98,7 @@ export function getUsers() { return request("/auth/users"); }
 export function createUser(payload) { return request("/auth/users", { method:"POST", body:JSON.stringify(payload) }); }
 export function updateUser(id,payload) { return request(`/auth/users/${id}`, { method:"PUT", body:JSON.stringify(payload) }); }
 export function resetBranchUserPassword(id,newPassword) { return request(`/auth/users/${id}/reset-password`, { method:"PUT", body:JSON.stringify({newPassword}) }); }
+
+export function saveSupervisorDailyInputs(branchId,businessDate,accessoriesCount,reason) {
+  return request("/general-shop-status",{method:"PUT",body:JSON.stringify({branchId:Number(branchId),businessDate,accessoriesCount:Number(accessoriesCount||0),reason:String(reason||"").trim()})});
+}

@@ -5,6 +5,8 @@ import {
   getTillBalanceDetails,
   getTillBalances,
   getTillBalancingContext,
+  getTillShortagePosition,
+  recordTillShortageSettlement,
   getTills,
   getCurrentUser,
   reorderTillTerminals,
@@ -64,6 +66,13 @@ export default function TillBalancing({ user }) {
   const [historyError, setHistoryError] = useState("");
   const [recordedBalanceStatus, setRecordedBalanceStatus] = useState("");
   const [dailyTransactionValidationOpen, setDailyTransactionValidationOpen] = useState(false);
+  const [shortagePosition, setShortagePosition] = useState(null);
+  const [settlementOpen, setSettlementOpen] = useState(false);
+  const [settlementEvent, setSettlementEvent] = useState(null);
+  const [settlementAmount, setSettlementAmount] = useState("");
+  const [settlementDate, setSettlementDate] = useState("");
+  const [settlementNote, setSettlementNote] = useState("");
+  const [settlementSaving, setSettlementSaving] = useState(false);
 
   async function loadTills() {
     let activeUser = user;
@@ -127,12 +136,18 @@ export default function TillBalancing({ user }) {
 
   async function loadContext(selectedId) {
     if (!selectedId) return;
-    const [nextContext, nextHistory] = await Promise.all([
+    const [nextContext, nextHistory, nextShortage] = await Promise.all([
       getTillBalancingContext(selectedId, businessDate),
       getTillBalances(selectedId),
+      getTillShortagePosition(selectedId, businessDate),
     ]);
     setContext(nextContext);
     setHistory(nextHistory);
+    setShortagePosition(nextShortage);
+    setSettlementEvent(null);
+    setSettlementAmount("");
+    setSettlementNote("");
+    setSettlementOpen(false);
 
     const latestBalanceForDate = nextHistory.find(
       (item) => String(item.business_date).slice(0, 10) === businessDate
@@ -348,6 +363,69 @@ export default function TillBalancing({ user }) {
     }
   }
 
+  function openSettlement(event) {
+    if (!event || Number(event.outstanding || 0) <= 0) return;
+    setSettlementEvent(event);
+    setSettlementAmount(String(event.outstanding));
+    const eventDate = String(event.businessDate || "").slice(0, 10);
+    const defaultSettlementDate = businessDate && businessDate >= eventDate ? businessDate : eventDate;
+    setSettlementDate(defaultSettlementDate);
+    setSettlementNote("");
+    setError("");
+    setSettlementOpen(true);
+  }
+
+  async function settleShortage() {
+    const amount = inputNumber(settlementAmount);
+    const eventOutstanding = Number(settlementEvent?.outstanding || 0);
+    if (!settlementEvent?.tillBalanceId) {
+      setError("Select a shortage event to settle.");
+      return;
+    }
+    if (!amount || amount <= 0) {
+      setError("Enter a settlement amount greater than zero.");
+      return;
+    }
+    const eventDate = String(settlementEvent.businessDate || "").slice(0, 10);
+    const paymentDate = String(settlementDate || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(paymentDate)) {
+      setError("Select a valid settlement date.");
+      return;
+    }
+    if (paymentDate < eventDate) {
+      setError(`Settlement date cannot be earlier than the shortage event date (${eventDate}).`);
+      return;
+    }
+    if (amount > eventOutstanding) {
+      setError("Settlement amount cannot exceed the outstanding amount on this shortage event.");
+      return;
+    }
+    setSettlementSaving(true);
+    setError("");
+    setMessage("");
+    try {
+      const result = await recordTillShortageSettlement(
+        tillId,
+        settlementEvent.tillBalanceId,
+        amount,
+        paymentDate,
+        settlementNote
+      );
+      setMessage(result.message || "Shortage settlement recorded successfully.");
+      setSettlementOpen(false);
+      setSettlementEvent(null);
+      setSettlementAmount("");
+      setSettlementDate("");
+      setSettlementNote("");
+      const refreshed = await getTillShortagePosition(tillId, businessDate);
+      setShortagePosition(refreshed);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSettlementSaving(false);
+    }
+  }
+
   async function openHistory(id) {
     setHistoryError("");
     setHistoryLoading(true);
@@ -510,6 +588,81 @@ export default function TillBalancing({ user }) {
         </section>
       </form>
 
+      {shortagePosition && (
+        <section className={`panel shortage-settlement-panel ${shortagePosition.outstanding > 0 ? "has-debt" : "settled"}`}>
+          <div className="panel-heading">
+            <div>
+              <h2>Till Shortage Counter</h2>
+              <p>Shortage is tracked by its original Till balance event. Repayments are allocated directly to that event and never rewrite the physical Till balance.</p>
+            </div>
+            <strong>UGX {formatMoney(shortagePosition.outstanding)}</strong>
+          </div>
+
+          <div className="shortage-settlement-body">
+            <div className="shortage-settlement-metrics">
+              <div><span>Current attendant</span><strong>{shortagePosition.currentEmployeeName || "—"}</strong></div>
+              <div><span>Total shortage incurred</span><strong>UGX {formatMoney(shortagePosition.shortageIncurred)}</strong></div>
+              <div><span>Recovered to date</span><strong>UGX {formatMoney(shortagePosition.paymentsToDate)}</strong></div>
+              <div><span>Outstanding shortage</span><strong className={shortagePosition.outstanding > 0 ? "debt" : "settled-value"}>UGX {formatMoney(shortagePosition.outstanding)}</strong></div>
+              <div><span>Effective working capital</span><strong>UGX {formatMoney(Math.max(operatingCapital - Number(shortagePosition.outstanding || 0), 0))}</strong></div>
+            </div>
+          </div>
+
+          <div className="shortage-events-section">
+            <div className="shortage-section-heading">
+              <div><strong>Shortage events</strong><span>Each event keeps its own original shortage and remaining balance.</span></div>
+            </div>
+            {shortagePosition.events?.length ? (
+              <div className="shortage-events-table">
+                <div className="shortage-event-row shortage-event-head">
+                  <span>Date</span><span>Employee</span><span>Shortage</span><span>Recovered</span><span>Outstanding</span><span>Action</span>
+                </div>
+                {shortagePosition.events.map((event) => (
+                  <div className="shortage-event-row" key={event.tillBalanceId}>
+                    <span>{event.businessDate}</span>
+                    <span>{event.employeeName}</span>
+                    <span>UGX {formatMoney(event.shortage)}</span>
+                    <span>UGX {formatMoney(event.recovered)}</span>
+                    <span className={event.outstanding > 0 ? "debt" : "settled-value"}>UGX {formatMoney(event.outstanding)}</span>
+                    <span>
+                      {event.outstanding > 0 ? (
+                        <button className="secondary-button settlement-button" type="button" onClick={() => openSettlement(event)}>Settle</button>
+                      ) : (
+                        <span className="settlement-status settled-status">SETTLED</span>
+                      )}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-state">No Till shortage events have been recorded.</div>
+            )}
+          </div>
+
+          {shortagePosition.payments?.length ? (
+            <div className="shortage-payments-section">
+              <div className="shortage-section-heading">
+                <div><strong>Settlement history</strong><span>Recorded repayments against this Till.</span></div>
+              </div>
+              <div className="shortage-events-table shortage-payments-table">
+                <div className="shortage-event-row shortage-event-head">
+                  <span>Date</span><span>Employee</span><span>Amount</span><span>Note</span><span>Recorded</span>
+                </div>
+                {shortagePosition.payments.map((payment) => (
+                  <div className="shortage-event-row" key={payment.id}>
+                    <span>{payment.paymentDate}</span>
+                    <span>{payment.employeeName}</span>
+                    <span>UGX {formatMoney(payment.amount)}</span>
+                    <span>{payment.note || "—"}</span>
+                    <span>{formatDateTime(payment.createdAt)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </section>
+      )}
+
       <section className="panel history-panel">
         <div className="panel-heading">
           <div><h2>Balance History</h2><p>Every balancing event remains as a separate record. Select a record to inspect the full count.</p></div>
@@ -527,6 +680,33 @@ export default function TillBalancing({ user }) {
           </div>)}
         </div> : <div className="empty-state">No balancing events recorded for this Till yet.</div>}
       </section>
+
+      {settlementOpen && settlementEvent && (
+        <div className="modal-backdrop" onClick={() => !settlementSaving && setSettlementOpen(false)}>
+          <div className="history-modal shortage-settlement-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <div><div className="eyebrow">SHORTAGE SETTLEMENT</div><h2>Settle Till Shortage</h2></div>
+              <button className="modal-close" type="button" onClick={() => !settlementSaving && setSettlementOpen(false)} aria-label="Close shortage settlement">×</button>
+            </div>
+            <p>Record the actual repayment against the selected shortage event. This payment does not change the original physical Till balance.</p>
+            <div className="settlement-detail-grid">
+              <div><span>Shortage event date</span><strong>{settlementEvent.businessDate}</strong></div>
+              <div><span>Employee responsible</span><strong>{settlementEvent.employeeName}</strong></div>
+              <div><span>Original shortage</span><strong>UGX {formatMoney(settlementEvent.shortage)}</strong></div>
+              <div><span>Already recovered</span><strong>UGX {formatMoney(settlementEvent.recovered)}</strong></div>
+              <div><span>Outstanding before payment</span><strong>UGX {formatMoney(settlementEvent.outstanding)}</strong></div>
+              <div><span>Remaining after payment</span><strong>UGX {formatMoney(Math.max(Number(settlementEvent.outstanding || 0) - inputNumber(settlementAmount), 0))}</strong></div>
+              <label><span>Settlement date</span><input type="date" value={settlementDate} min={String(settlementEvent.businessDate || "").slice(0, 10)} onChange={(event) => setSettlementDate(event.target.value)} /></label>
+              <label><span>Settlement amount</span><input className="numeric-input settlement-amount-input" inputMode="numeric" value={formatEntry(settlementAmount)} onChange={(event) => setSettlementAmount(event.target.value.replace(/,/g, ""))} autoFocus /></label>
+              <label><span>Note (optional)</span><input value={settlementNote} onChange={(event) => setSettlementNote(event.target.value)} placeholder="e.g. Cash repayment" /></label>
+            </div>
+            <div className="modal-actions">
+              <button className="secondary-button" type="button" onClick={() => setSettlementOpen(false)} disabled={settlementSaving}>Cancel</button>
+              <button className="primary-button" type="button" onClick={settleShortage} disabled={settlementSaving}>{settlementSaving ? "Saving..." : "Confirm Settlement"}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {dailyTransactionValidationOpen && (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="daily-transaction-validation-title">
@@ -565,31 +745,165 @@ export default function TillBalancing({ user }) {
       {historyLoading && <div className="modal-backdrop"><div className="history-modal"><p>Loading balance details...</p></div></div>}
       {historyError && <div className="modal-backdrop"><div className="history-modal"><h3>Unable to open balance</h3><p>{historyError}</p><button className="secondary-button" type="button" onClick={() => setHistoryError("")}>Close</button></div></div>}
       {selectedHistory && <div className="modal-backdrop" onClick={() => setSelectedHistory(null)}>
-        <div className="history-modal" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="history-modal historical-till-mirror"
+          onClick={(event) => event.stopPropagation()}
+          style={{ maxWidth: "1180px", width: "calc(100vw - 48px)", maxHeight: "92vh", overflowY: "auto" }}
+        >
           <div className="modal-header">
-            <div><div className="eyebrow">BALANCE #{selectedHistory.balance.id}</div><h2>Balance details</h2></div>
-            <button className="modal-close" type="button" onClick={() => setSelectedHistory(null)} aria-label="Close balance details">×</button>
+            <div>
+              <div className="eyebrow">BALANCE #{selectedHistory.balance.id}</div>
+              <h2>Historical Till Balancing</h2>
+              <p>Read-only mirror of the Till Balancing record exactly as stored for this balancing event.</p>
+            </div>
+            <button className="modal-close" type="button" onClick={() => setSelectedHistory(null)} aria-label="Close historical Till balancing">×</button>
           </div>
-          <div className="detail-meta">
-            <div><span>Till</span><strong>{selectedHistory.balance.till_name}</strong></div>
-            <div><span>Attendant</span><strong>{selectedHistory.balance.employee_name}</strong></div>
-            <div><span>Business date</span><strong>{selectedHistory.balance.business_date}</strong></div>
-            <div><span>Balanced at</span><strong>{formatDateTime(selectedHistory.balance.balanced_at)}</strong></div>
-          </div>
-          <div className="detail-summary">
-            <div><span>Operating Capital</span><strong>UGX {formatMoney(selectedHistory.balance.operating_capital)}</strong></div>
-            <div><span>Total Cash</span><strong>UGX {formatMoney(selectedHistory.balance.total_cash)}</strong></div>
-            <div><span>Total Float</span><strong>UGX {formatMoney(selectedHistory.balance.total_float)}</strong></div>
-            <div><span>Actual Capital</span><strong>UGX {formatMoney(selectedHistory.balance.actual_till_capital)}</strong></div>
+
+          <section className="balance-toolbar till-context-grid historical-context-grid">
+            <div className="context-card till-name-card">
+              <span>Till Name</span>
+              <strong>{selectedHistory.balance.till_name}</strong>
+            </div>
+            <div className="context-card date-card">
+              <span>Business Date</span>
+              <strong>{selectedHistory.balance.business_date}</strong>
+            </div>
+            <div className="context-card attendant-card">
+              <span>Attendant</span>
+              <strong>{selectedHistory.balance.employee_name}</strong>
+            </div>
+            <div className="context-card operating-capital-card">
+              <span>Operating Capital</span>
+              <strong>UGX {formatMoney(selectedHistory.balance.operating_capital)}</strong>
+            </div>
+          </section>
+
+          <section className="balance-grid historical-mirror-grid">
+            <div className="panel">
+              <div className="panel-heading">
+                <div><h2>Cash Calculator</h2><p>Physical cash captured during this historical balancing event.</p></div>
+                <strong>UGX {formatMoney(selectedHistory.balance.total_cash)}</strong>
+              </div>
+              <div className="cash-table">
+                <div className="cash-row cash-head"><span>Denomination</span><span>Quantity</span><span>Amount</span></div>
+                {(selectedHistory.cashItems || []).map((item) => {
+                  const isBatch = item.item_type === "BATCH";
+                  const isCoins = item.item_type === "COINS";
+                  const label = isBatch
+                    ? "BATCH"
+                    : `UGX ${formatMoney(item.denomination)} ${isCoins ? "coin" : "notes"}`;
+                  const quantity = isBatch ? "—" : Number(item.quantity || 0).toLocaleString("en-UG");
+                  return (
+                    <div className="cash-row" key={item.id}>
+                      <span>{label}</span>
+                      <span className="numeric-input historical-readonly-value">{quantity}</span>
+                      <strong>UGX {formatMoney(item.amount)}</strong>
+                    </div>
+                  );
+                })}
+                <div className="cash-total-row"><span>Total Cash</span><strong>UGX {formatMoney(selectedHistory.balance.total_cash)}</strong></div>
+              </div>
+            </div>
+
+            <div className="panel">
+              <div className="panel-heading">
+                <div><h2>Float Balances</h2><p>Terminal float positions captured during this historical balancing event.</p></div>
+                <strong>UGX {formatMoney(selectedHistory.balance.total_float)}</strong>
+              </div>
+              {(selectedHistory.floatBalances || []).length ? (
+                <div className="float-list">
+                  {selectedHistory.floatBalances.map((item) => (
+                    <div className="float-row" key={item.id} style={{ gridTemplateColumns: "minmax(0, 1fr) 180px", alignItems: "center" }}>
+                      <div className="float-position-label" style={{ textAlign: "left", justifySelf: "stretch", minWidth: 0 }}>
+                        <div style={{ textAlign: "left", width: "100%" }}>
+                          <strong>{item.service_provider_name}</strong>
+                          <span>{item.terminal_name}</span>
+                        </div>
+                      </div>
+                      <span className="numeric-input historical-readonly-value">UGX {formatMoney(item.amount)}</span>
+                    </div>
+                  ))}
+                  <div className="cash-total-row"><span>Total Float</span><strong>UGX {formatMoney(selectedHistory.balance.total_float)}</strong></div>
+                </div>
+              ) : <div className="empty-state">No float balances were recorded for this event.</div>}
+            </div>
+          </section>
+
+          <section className="panel transaction-panel historical-transaction-panel">
+            <div className="panel-heading">
+              <div>
+                <h2>Daily Transactions</h2>
+                <p>Terminal transaction counts recorded for the business date of this historical balancing event.</p>
+              </div>
+              <strong>{(selectedHistory.dailyTransactions || []).reduce((sum, terminal) => sum + Number(terminal.transactionCount || 0), 0).toLocaleString("en-UG")}</strong>
+            </div>
+            {(selectedHistory.dailyTransactions || []).length ? (
+              <div className="transaction-grid till-transaction-grid">
+                {selectedHistory.dailyTransactions.map((terminal) => (
+                  <div key={terminal.id || terminal.terminalId} className="historical-transaction-field">
+                    <span>{terminal.terminalName}</span>
+                    <span className="numeric-input historical-readonly-value">{Number(terminal.transactionCount || 0).toLocaleString("en-UG")}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-state">No Daily Transaction counts were recorded for this business date.</div>
+            )}
+          </section>
+
+          <section className={`result-card ${String(selectedHistory.balance.status || "").toLowerCase()}`}>
+            <div><span>Actual Till Capital</span><strong>UGX {formatMoney(selectedHistory.balance.actual_till_capital)}</strong></div>
             <div><span>Difference</span><strong>{selectedHistory.balance.status === "BALANCED" ? "UGX 0" : `${selectedHistory.balance.status === "SHORT" ? "−" : "+"}UGX ${formatMoney(Math.abs(selectedHistory.balance.difference))}`}</strong></div>
             <div><span>Status</span><strong className={`result-status ${String(selectedHistory.balance.status).toLowerCase()}`}>{selectedHistory.balance.status}</strong></div>
-          </div>
-          <div className="detail-columns">
-            <div><h3>Cash count</h3><div className="detail-list">{selectedHistory.cashItems.map((item) => <div key={item.id}><span>{item.item_type === "DENOMINATION" ? `UGX ${formatMoney(item.denomination)} notes` : item.item_type === "COINS" ? `UGX ${formatMoney(item.denomination)} coins` : "BATCH"}</span><strong>{item.item_type === "BATCH" ? `UGX ${formatMoney(item.amount)}` : `${item.quantity} × UGX ${formatMoney(item.denomination)} = UGX ${formatMoney(item.amount)}`}</strong></div>)}</div></div>
-            <div><h3>Float balances</h3><div className="detail-list">{selectedHistory.floatBalances.map((item) => <div key={item.id}><span>{item.service_provider_name} — {item.terminal_name}</span><strong>UGX {formatMoney(item.amount)}</strong></div>)}</div></div>
-          </div>
+            <div><span>Balanced At</span><strong>{formatDateTime(selectedHistory.balance.balanced_at)}</strong></div>
+          </section>
+
+          <section className={`panel shortage-settlement-panel ${(selectedHistory.shortageCounter?.outstanding || 0) > 0 ? "has-debt" : "settled"}`}>
+            <div className="panel-heading">
+              <div>
+                <h2>Till Shortage Counter</h2>
+                <p>Historical shortage position through {selectedHistory.shortageCounter?.asOfDate || selectedHistory.balance.business_date}.</p>
+              </div>
+              <strong>UGX {formatMoney(selectedHistory.shortageCounter?.outstanding)}</strong>
+            </div>
+
+            <div className="shortage-settlement-body">
+              <div className="shortage-settlement-metrics">
+                <div><span>Attendant</span><strong>{selectedHistory.balance.employee_name || "—"}</strong></div>
+                <div><span>Total shortage incurred</span><strong>UGX {formatMoney(selectedHistory.shortageCounter?.shortageIncurred)}</strong></div>
+                <div><span>Recovered to date</span><strong>UGX {formatMoney(selectedHistory.shortageCounter?.recovered)}</strong></div>
+                <div><span>Outstanding shortage</span><strong className={Number(selectedHistory.shortageCounter?.outstanding || 0) > 0 ? "debt" : "settled-value"}>UGX {formatMoney(selectedHistory.shortageCounter?.outstanding)}</strong></div>
+                <div><span>Effective working capital</span><strong>UGX {formatMoney(Math.max(Number(selectedHistory.balance.operating_capital || 0) - Number(selectedHistory.shortageCounter?.outstanding || 0), 0))}</strong></div>
+              </div>
+            </div>
+
+            <div className="shortage-events-section">
+              <div className="shortage-section-heading">
+                <div><strong>Shortage events</strong><span>Historical events through the selected balance date.</span></div>
+              </div>
+              {selectedHistory.shortageCounter?.events?.length ? (
+                <div className="shortage-events-table">
+                  <div className="shortage-event-row shortage-event-head">
+                    <span>Date</span><span>Employee</span><span>Shortage</span><span>Recovered</span><span>Outstanding</span><span>Status</span>
+                  </div>
+                  {selectedHistory.shortageCounter.events.map((event) => (
+                    <div className="shortage-event-row" key={event.tillBalanceId}>
+                      <span>{event.businessDate}</span>
+                      <span>{event.employeeName}</span>
+                      <span>UGX {formatMoney(event.shortage)}</span>
+                      <span>UGX {formatMoney(event.recovered)}</span>
+                      <span className={event.outstanding > 0 ? "debt" : "settled-value"}>UGX {formatMoney(event.outstanding)}</span>
+                      <span className={`settlement-status ${event.outstanding > 0 ? "debt" : "settled-status"}`}>{event.outstanding > 0 ? "OUTSTANDING" : "SETTLED"}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="empty-state">No Till shortage events had been recorded up to this balance date.</div>
+              )}
+            </div>
+          </section>
         </div>
-      </div>}
+      </div>}}
     </main>
   );
 }

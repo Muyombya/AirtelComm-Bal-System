@@ -1,0 +1,270 @@
+/* BUILD 046 — Till Shortage Counter presentation */
+.shortage-counter-panel {
+  margin-top: 22px;
+  border: 1px solid #d7dee8;
+  border-radius: 16px;
+  background: #fff;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+}
+
+.shortage-counter-panel.has-debt {
+  border-color: #e6b7b7;
+}
+
+.shortage-counter-panel.settled {
+  border-color: #cfd8d1;
+}
+
+.shortage-counter-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid #e5e9ef;
+  background: #fafbfc;
+}
+
+.shortage-counter-kicker {
+  margin-bottom: 5px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: #64748b;
+}
+
+.shortage-counter-header h2 {
+  margin: 0;
+  font-size: 21px;
+  line-height: 1.2;
+  color: #0f172a;
+}
+
+.shortage-counter-header p {
+  margin: 7px 0 0;
+  max-width: 820px;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.shortage-counter-total {
+  min-width: 190px;
+  padding: 9px 0 0;
+  text-align: right;
+}
+
+.shortage-counter-total span {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: #64748b;
+}
+
+.shortage-counter-total strong {
+  font-size: 22px;
+  color: #b42318;
+}
+
+.shortage-counter-panel.settled .shortage-counter-total strong,
+.shortage-counter-panel.settled .positive-value {
+  color: #18794e;
+}
+
+.shortage-counter-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  border-bottom: 1px solid #e5e9ef;
+}
+
+.shortage-counter-metrics > div {
+  min-width: 0;
+  padding: 17px 18px;
+  border-right: 1px solid #e5e9ef;
+}
+
+.shortage-counter-metrics > div:last-child {
+  border-right: 0;
+}
+
+.shortage-counter-metrics span {
+  display: block;
+  margin-bottom: 7px;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.shortage-counter-metrics strong {
+  color: #0f172a;
+  font-size: 15px;
+}
+
+.negative-value {
+  color: #c00000 !important;
+}
+
+.positive-value {
+  color: #008000 !important;
+}
+
+.shortage-counter-section {
+  padding: 19px 24px 22px;
+}
+
+.shortage-counter-section + .shortage-counter-section {
+  border-top: 1px solid #e5e9ef;
+}
+
+.shortage-counter-section-heading {
+  margin-bottom: 12px;
+}
+
+.shortage-counter-section-heading strong {
+  display: block;
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.shortage-counter-section-heading span {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.shortage-events-table {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.shortage-event-row {
+  display: grid;
+  grid-template-columns: 1.1fr 1.1fr 1.15fr 1.15fr 1.2fr 100px;
+  align-items: center;
+  min-width: 780px;
+  border-bottom: 1px solid #edf0f3;
+}
+
+.shortage-event-row > span,
+.shortage-event-row > strong {
+  padding: 11px 10px;
+  font-size: 12px;
+  color: #334155;
+}
+
+.shortage-event-row > :first-child {
+  padding-left: 0;
+}
+
+.shortage-event-row > :last-child {
+  padding-right: 0;
+  text-align: right;
+}
+
+.shortage-event-head {
+  border-bottom: 2px solid #cbd5e1;
+}
+
+.shortage-event-head > span {
+  padding-top: 0;
+  padding-bottom: 8px;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.settlement-button {
+  min-width: 76px;
+  padding: 7px 12px;
+  border: 1px solid #94a3b8;
+  border-radius: 7px;
+  background: #fff;
+  color: #0f3d91;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.settlement-button:hover {
+  background: #f1f5f9;
+}
+
+.settlement-status {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.settled-status {
+  color: #18794e;
+}
+
+.shortage-counter-empty {
+  padding: 22px 0 4px;
+  color: #64748b;
+  text-align: center;
+  font-size: 13px;
+}
+
+.settlement-history {
+  padding-top: 18px;
+}
+
+.shortage-payments-table .shortage-event-row {
+  grid-template-columns: 1.1fr 1.1fr 1.2fr 1.6fr 1.4fr;
+  min-width: 700px;
+}
+
+@media (max-width: 900px) {
+  .shortage-counter-header {
+    flex-direction: column;
+  }
+
+  .shortage-counter-total {
+    min-width: 0;
+    width: 100%;
+    padding-top: 0;
+    text-align: left;
+  }
+
+  .shortage-counter-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .shortage-counter-metrics > div:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .shortage-counter-metrics > div:nth-child(n + 3) {
+    border-top: 1px solid #e5e9ef;
+  }
+}
+
+@media print {
+  .shortage-counter-panel {
+    margin-top: 14px;
+    border: 1px solid #999;
+    box-shadow: none;
+    break-inside: avoid;
+  }
+
+  .shortage-counter-header {
+    background: #fff;
+  }
+
+  .settlement-button {
+    display: none;
+  }
+
+  .shortage-event-row {
+    min-width: 0;
+  }
+}

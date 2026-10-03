@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { getBranches, getGeneralShopStatus, saveGeneralShopStatus, recordShortagePayment } from "../services/api";
-import "../general-shop-status-header-facelift.css";
+import { getBranches, getGeneralShopStatus } from "../services/api";
+import "../branch-performance-status.css";
 
 const money = (n) => `UGX ${Number(n || 0).toLocaleString("en-UG")}`;
+
 function localBusinessDate() {
   const now = new Date();
   const offset = now.getTimezoneOffset() * 60000;
@@ -14,30 +15,28 @@ const today = localBusinessDate();
 export default function GeneralShopStatus({ user }) {
   const [date, setDate] = useState(today);
   const [branches, setBranches] = useState([]);
-  const [branchId, setBranchId] = useState(user?.role === "SUPERVISOR" ? String(user.branch_id || "") : "");
+  const [branchId, setBranchId] = useState(
+    user?.role === "SUPERVISOR" ? String(user.branch_id || "") : ""
+  );
   const [data, setData] = useState(null);
-  const [accessories, setAccessories] = useState("");
-  const [reason, setReason] = useState("");
-  const [paymentInputs, setPaymentInputs] = useState({});
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [paying, setPaying] = useState(null);
-  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const isHistorical = date < today;
 
   async function load() {
-    setLoading(true); setError(""); setMessage("");
+    if (!branchId) return;
+    setLoading(true);
+    setError("");
     try {
-      if (!branchId) return;
       const result = await getGeneralShopStatus(Number(branchId), date);
       setData(result);
-      setAccessories(result?.accessoriesCount ?? "");
-      setReason(result?.reason || "");
-      setPaymentInputs({});
-    } catch (e) { setError(e?.message || "Failed to load General Shop Status."); }
-    finally { setLoading(false); }
+    } catch (e) {
+      setError(e?.message || "Failed to load Branch Performance Status.");
+    } finally {
+      setLoading(false);
+    }
   }
+
   useEffect(() => {
     if (user?.role === "SUPERVISOR") {
       setBranches([]);
@@ -45,212 +44,393 @@ export default function GeneralShopStatus({ user }) {
       return;
     }
 
-    getBranches().then(rows => {
-      const list = Array.isArray(rows) ? rows : [];
-      setBranches(list);
-      if (!list.length) {
-        setBranchId("");
-        setData(null);
-        setLoading(false);
-        return;
-      }
-      if (!branchId || !list.some((branch) => String(branch.id) === String(branchId))) {
-        setBranchId(String(list[0].id));
-      }
-    }).catch(e => setError(e?.message || "Failed to load branches."));
-  }, [user?.role, user?.branch_id]);  useEffect(() => { if (branchId) load(); }, [date, branchId]);
+    getBranches()
+      .then((rows) => {
+        const list = Array.isArray(rows) ? rows : [];
+        setBranches(list);
+        if (!list.length) {
+          setBranchId("");
+          setData(null);
+          setLoading(false);
+          return;
+        }
+        if (!branchId || !list.some((branch) => String(branch.id) === String(branchId))) {
+          setBranchId(String(list[0].id));
+        }
+      })
+      .catch((e) => setError(e?.message || "Failed to load branches."));
+  }, [user?.role, user?.branch_id]);
+
+  useEffect(() => {
+    if (branchId) load();
+  }, [date, branchId]);
 
   const status = String(data?.totals?.status || "BALANCED").toUpperCase();
-  const requiresReason = status === "SHORT" || status === "EXCESS";
   const positions = Array.isArray(data?.positions) ? data.positions : [];
   const tills = Array.isArray(data?.tills) ? data.tills : [];
-  const dailyTransactions = Array.isArray(data?.dailyTransactions) ? data.dailyTransactions : [];
+  const dailyTransactions = Array.isArray(data?.dailyTransactions)
+    ? data.dailyTransactions
+    : [];
   const history = Array.isArray(data?.history) ? data.history : [];
   const shortages = Array.isArray(data?.shortageCounter) ? data.shortageCounter : [];
+  const cashBook = data?.cashBook || {};
+  const cashBookExpenses = Array.isArray(cashBook.expenses) ? cashBook.expenses : [];
+
+  const totalDifference = Number(data?.totals?.difference || 0);
+  const adjustedDifference = Number(data?.totals?.adjustedDifference || 0);
+  const totalFloat = Number(data?.totals?.totalFloat || 0);
+  const totalCash = Number(data?.totals?.totalCash || 0);
+  const branchCapital = Number(data?.totals?.branchCapital || 0);
+  const adjustedBranchCapital = Number(data?.totals?.adjustedBranchCapital || 0);
+  const totalTransactions = dailyTransactions.reduce(
+    (sum, item) => sum + Number(item.transactionCount || 0),
+    0
+  );
+  const totalShortageIncurred = shortages.reduce(
+    (sum, item) => sum + Number(item.totalIncurred || 0),
+    0
+  );
+  const totalShortageRecovered = shortages.reduce(
+    (sum, item) => sum + Number(item.recoveredToDate || 0),
+    0
+  );
+  const totalShortageOutstanding = shortages.reduce(
+    (sum, item) => sum + Number(item.balance || 0),
+    0
+  );
+  const totalTodayShortage = shortages.reduce(
+    (sum, item) => sum + Number(item.newShortage || 0),
+    0
+  );
 
   const statusText = useMemo(() => {
     if (status === "BALANCED") return "BALANCED";
     if (status === "INCOMPLETE") return "BALANCING INCOMPLETE";
-    const diff = Math.abs(Number(data?.totals?.difference || 0)).toLocaleString("en-UG");
-    return `${status} BY UGX ${diff}`;
-  }, [data, status]);
+    return status;
+  }, [status]);
 
-  const totalAdded = shortages.reduce((s, x) => s + Number(x.added || 0), 0);
-  const totalOwed = shortages.reduce((s, x) => s + Number(x.amountOwed || 0), 0);
-  const totalPaid = shortages.reduce((s, x) => s + Number(x.paidOff || 0), 0);
-  const totalBalance = shortages.reduce((s, x) => s + Number(x.balance || 0), 0);
-  const totalRecovered = shortages.reduce((s, x) => s + Number(x.paidOff || 0), 0);
-
-  function formatEntry(value) {
-    const raw = String(value ?? "").replace(/,/g, "");
-    return /^\d*$/.test(raw) ? (raw ? Number(raw).toLocaleString("en-UG") : "") : "";
+  if (loading) {
+    return (
+      <main className="app-shell branch-performance-status">
+        <div className="bps-loading">Loading Branch Performance Status…</div>
+      </main>
+    );
   }
 
-  async function save() {
-    if (isHistorical) { setError("Historical General Shop Status is read-only. Select today to make changes."); return; }
-    setMessage(""); setError("");
-    if (requiresReason && !reason.trim()) { setError("A brief reason is required when the General Shop Status is SHORT or EXCESS."); return; }
-    setSaving(true);
-    try {
-      await saveGeneralShopStatus(Number(branchId), date, Number(String(accessories ?? "").replace(/,/g, "") || 0), reason.trim());
-      setMessage("General Shop Status saved successfully."); await load();
-    } catch (e) { setError(e?.message || "Failed to save General Shop Status."); }
-    finally { setSaving(false); }
-  }
-
-  async function pay(employeeId, employeeName, outstanding) {
-    if (isHistorical) { setError("Historical Branch Shortage Counter is read-only. Select today to record a payment."); return; }
-    const raw = String(paymentInputs[employeeId] || "").replace(/,/g, "");
-    const value = Number(raw || 0);
-    if (!value || value <= 0) { setError("Enter a valid payment amount before recording a shortage payment."); return; }
-    if (value > Number(outstanding || 0)) {
-      setError(`Payment cannot exceed ${employeeName}'s outstanding balance of ${money(outstanding)}.`);
-      return;
-    }
-    const confirmed = window.confirm(`Record ${money(value)} as a shortage payment for ${employeeName}?\n\nThis creates a permanent recovery entry and reduces the outstanding balance.`);
-    if (!confirmed) return;
-    setPaying(employeeId); setError(""); setMessage("");
-    try {
-      await recordShortagePayment(Number(branchId), employeeId, value, date, "");
-      setPaymentInputs(v => ({ ...v, [employeeId]: "" }));
-      setMessage(`${money(value)} shortage payment recorded for ${employeeName}.`); await load();
-    } catch (e) { setError(e?.message || "Failed to record shortage payment."); }
-    finally { setPaying(null); }
-  }
-
-  if (loading) return <main className="app-shell general-shop-status"><div className="loading-card">Loading General Shop Status…</div></main>;
-  if (!branches.length && !(user?.role === "SUPERVISOR" && branchId)) return (
-    <main className="app-shell general-shop-status">
-      <header className="gss-report-header gss-professional-header">
-        <div className="gss-heading-copy">
-          <h1>GENERAL SHOP STATUS</h1>
-          <p>Branch operating position and daily balancing overview</p>
-        </div>
-
-        <div className="gss-branch-identity" aria-label="Current branch">
-          <span>BRANCH</span>
-          <strong>{data?.branch?.name || user?.branch_name || "Branch not assigned"}</strong>
-        </div>
-
-        <div className="gss-header-date">
-          <label>Business Date
-            <input type="date" max={today} value={date} onChange={(e) => setDate(e.target.value)} />
-          </label>
-        </div>
-      </header>
-      <div className="gss-status-line incomplete"><span>NO BRANCHES CONFIGURED</span></div>
-      <div className="gss-empty gss-empty-state">
-        No branches are currently configured. Go to <strong>Master Data</strong> and add a branch to begin using General Shop Status.
-      </div>
-    </main>
-  );
-  if (error && !data) return <main className="app-shell general-shop-status"><div className="error-message">{error}</div></main>;
-
-  return (
-    <main className="app-shell general-shop-status">
-      <header className="gss-report-header">
-        <h1>{data?.branch?.name || "GENERAL SHOP STATUS"}</h1>
-        <div className="gss-header-controls">
-          <span>GENERAL SHOP STATUS</span>
-          {user?.role === "SUPERVISOR" ? (
-            <span className="gss-branch-name">{data?.branch?.name || user?.branch_name || "Branch not assigned"}</span>
-          ) : (
-            <label>Branch
-              <select value={branchId} onChange={(e) => setBranchId(e.target.value)}>
-                {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
-              </select>
-            </label>
-          )}
-          <label>Business Date <input type="date" max={today} value={date} onChange={(e) => setDate(e.target.value)} /></label>
-        </div>
-      </header>
-
-      <div className={`gss-status-line ${status.toLowerCase()}`}>
-        <span>{statusText}</span>
-        {isHistorical && <span className="gss-history-badge">HISTORICAL • READ ONLY</span>}
-      </div>
-      {message && <div className="gss-message success-message">{message}</div>}
-      {error && <div className="gss-message error-message">{error}</div>}
-
-      <section className="gss-report-top">
-        <div className="gss-report-panel gss-closing-float">
-          <div className="gss-report-title">CLOSING FLOAT</div>
-          <div className="gss-table">
-            <div className="gss-row gss-head"><span>ITEM</span><span className="gss-number">CLOSING BAL</span></div>
-            {positions.map((p, i) => <div className="gss-row" key={`${p.terminal_name}-${i}`}><span>{p.terminal_name || "—"}</span><span className="gss-number">{Number(p.amount || 0).toLocaleString("en-UG")}</span></div>)}
-            {!positions.length && <div className="gss-empty">No closing float recorded.</div>}
-            <div className="gss-row gss-total-row"><span>Total Float</span><span className="gss-number">{Number(data?.totals?.totalFloat || 0).toLocaleString("en-UG")}</span></div>
+  if (!branches.length && !(user?.role === "SUPERVISOR" && branchId)) {
+    return (
+      <main className="app-shell branch-performance-status">
+        <header className="bps-header">
+          <div>
+            <div className="bps-company-name">AIRTEL COMMUNICATIONS</div>
+            <h1>BRANCH PERFORMANCE STATUS</h1>
+            <p>Daily operating, balancing and recovery statement</p>
           </div>
-        </div>
-
-        <div className="gss-report-side">
-          <div className="gss-report-panel">
-            <div className="gss-report-title">DAILY TRANSACTIONS</div>
-            <div className="gss-table">
-              <div className="gss-row gss-head"><span>TERMINAL NAME</span><span className="gss-number">COUNT</span></div>
-              {dailyTransactions.map((terminal, i) => <div className="gss-row" key={`${terminal.terminal_id}-${i}`}><span>{terminal.terminal_name || "—"}</span><span className="gss-number">{Number(terminal.transactionCount || 0).toLocaleString("en-UG")}</span></div>)}
+          <div className="bps-header-actions">
+            <button type="button" className="bps-print-button" onClick={() => window.print()}>
+              Print PDF
+            </button>
+            <div className="bps-header-meta">
+              <div><span>BUSINESS DATE</span><strong>{date}</strong></div>
             </div>
           </div>
-          <div className="gss-report-panel gss-accessories-panel">
-            <div className="gss-report-title">ACCESSORIES</div>
-            <div className="gss-accessories-inline"><span>Total Sales :</span><input inputMode="numeric" value={formatEntry(accessories)} onChange={(e) => { const raw=e.target.value.replace(/,/g,""); if(/^\d*$/.test(raw)) setAccessories(raw); }} placeholder="0" readOnly={isHistorical} disabled={isHistorical} /><button type="button" onClick={save} disabled={saving || isHistorical}>{saving ? "Saving…" : "Save"}</button></div>
+        </header>
+        <div className="bps-status-bar incomplete">NO BRANCHES CONFIGURED</div>
+        <div className="bps-empty">
+          No branches are currently configured. Go to <strong>Master Data</strong> and add a branch to begin.
+        </div>
+      </main>
+    );
+  }
+
+  if (error && !data) {
+    return (
+      <main className="app-shell branch-performance-status">
+        <div className="bps-error">{error}</div>
+      </main>
+    );
+  }
+
+  const branchName = data?.branch?.name || user?.branch_name || "Branch not assigned";
+  const imbalanceRemark = data?.imbalanceRemark || data?.reason || "";
+
+  return (
+    <main className="app-shell branch-performance-status">
+      <header className="bps-header">
+        <div className="bps-report-heading">
+          <div className="bps-company-name">AIRTEL COMMUNICATIONS</div>
+          <h1>{String(branchName).toUpperCase()} BRANCH PERFORMANCE REPORT</h1>
+          <p>Daily operating, balancing and recovery statement</p>
+        </div>
+
+        <div className="bps-header-actions">
+          <button type="button" className="bps-print-button" onClick={() => window.print()}>
+            Print PDF
+          </button>
+          <div className="bps-header-meta">
+            <div>
+              <span>BRANCH</span>
+              {user?.role === "SUPERVISOR" ? (
+                <strong>{branchName}</strong>
+              ) : (
+                <select value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+                  {branches.map((branch) => (
+                    <option key={branch.id} value={branch.id}>{branch.name}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+            <label>
+              <span>BUSINESS DATE</span>
+              <input type="date" max={today} value={date} onChange={(e) => setDate(e.target.value)} />
+            </label>
+          </div>
+        </div>
+      </header>
+
+      <div className={`bps-status-bar ${status.toLowerCase()}`}>
+        <strong>{statusText}</strong>
+        {isHistorical && <span>HISTORICAL • READ ONLY</span>}
+      </div>
+
+      {error && <div className="bps-message error">{error}</div>}
+
+      <section className="bps-section">
+        <div className="bps-section-title">BRANCH OPERATING POSITION</div>
+        <div className="bps-statement">
+          <div className="bps-line bps-column-head">
+            <span>POSITION</span>
+            <span className="bps-number">CURRENT DAY</span>
+          </div>
+          <div className="bps-line"><span>Total Float</span><span className="bps-number">{money(totalFloat)}</span></div>
+          <div className="bps-line"><span>Total Cash</span><span className="bps-number">{money(totalCash)}</span></div>
+          <div className="bps-line"><span>Branch Operating Capital</span><span className="bps-number">{money(branchCapital)}</span></div>
+          <div className="bps-line bps-subtotal"><span>Actual Branch Capital</span><span className="bps-number">{money(totalFloat + totalCash)}</span></div>
+          <div className="bps-line">
+            <span>Imbalance</span>
+            <span className={`bps-number ${totalDifference < 0 ? "negative" : totalDifference > 0 ? "positive" : ""}`}>
+              {totalDifference === 0 ? money(0) : `${totalDifference < 0 ? "−" : "+"}${money(Math.abs(totalDifference))}`}
+            </span>
           </div>
         </div>
       </section>
 
-      <section className="gss-capital-panel">
-        <div className="gss-capital-row"><span>Total Float</span><strong>{money(data?.totals?.totalFloat)}</strong></div>
-        <div className="gss-capital-row"><span>Total Cash</span><strong>{money(data?.totals?.totalCash)}</strong></div>
-        <div className="gss-capital-row"><span>Branch Captl</span><strong>{money(data?.totals?.branchCapital)}</strong></div>
-        <div className="gss-capital-row"><span>Imbalance</span><strong className={Number(data?.totals?.difference || 0) < 0 ? "negative" : Number(data?.totals?.difference || 0) > 0 ? "positive" : ""}>{data?.totals?.difference === 0 ? money(0) : `${data?.totals?.difference < 0 ? "Short -" : "Excess +"}${Math.abs(Number(data?.totals?.difference || 0)).toLocaleString("en-UG")}`}</strong></div>
-        <div className="gss-capital-row gss-adjusted-row"><span>Capital incl. Shortage Position</span><strong>{money(data?.totals?.adjustedBranchCapital)}</strong></div>
-        <div className="gss-capital-row gss-adjusted-row"><span>Adjusted Imbalance</span><strong className={Number(data?.totals?.adjustedDifference || 0) < 0 ? "negative" : Number(data?.totals?.adjustedDifference || 0) > 0 ? "positive" : ""}>{money(data?.totals?.adjustedDifference)}</strong></div>
-        <div className="gss-reason-line"><span>Reason :</span><textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder={requiresReason ? "Brief reason for imbalance…" : ""} rows={2} readOnly={isHistorical} /><button type="button" onClick={save} disabled={saving || isHistorical}>{saving ? "Saving…" : "Save Status"}</button></div>
-      </section>
-
-      <section className="gss-report-panel gss-full-panel">
-        <div className="gss-report-title">TILL POSITION</div>
-        <div className="gss-table gss-till-table">
-          <div className="gss-row gss-head gss-till-grid"><span>Till</span><span>Attendant</span><span className="gss-number">Operating</span><span className="gss-number">Actual</span><span className="gss-number">Difference</span><span>Status</span></div>
-          {tills.map((x, i) => { const b=x.balance; const diff=Number(b?.difference||0); return <div className="gss-row gss-till-grid" key={x.till?.id || i}><span>{x.till?.name || "—"}</span><span>{b?.attendant_name || "—"}</span><span className="gss-number">{b ? money(b.operating_capital) : "—"}</span><span className="gss-number">{b ? money(b.actual_till_capital) : "—"}</span><span className={`gss-number ${diff<0?"negative":diff>0?"positive":""}`}>{b ? `${diff<0?"−":diff>0?"+":""}UGX ${Math.abs(diff).toLocaleString("en-UG")}` : "—"}</span><span className={`gss-status-tag ${String(b?.status||"NOT BALANCED").toLowerCase()}`}>{b?.status || "NOT BALANCED"}</span></div>; })}
+      <section className="bps-section">
+        <div className="bps-section-title">ADJUSTED POSITION</div>
+        <div className="bps-statement">
+          <div className="bps-line">
+            <span>Capital Including Shortage Position</span>
+            <span className="bps-number">{money(adjustedBranchCapital)}</span>
+          </div>
+          <div className="bps-line bps-emphasis">
+            <span>Adjusted Imbalance</span>
+            <span className={`bps-number ${adjustedDifference < 0 ? "negative" : adjustedDifference > 0 ? "positive" : ""}`}>
+              {money(adjustedDifference)}
+            </span>
+          </div>
         </div>
       </section>
 
-      <section className="gss-report-panel gss-full-panel">
-        <div className="gss-report-title">BRANCH SHORTAGE COUNTER</div>
-        <div className="gss-table shortage-table">
-          <div className="gss-row gss-head shortage-grid"><span>NAME</span><span className="gss-number">AMOUNT OWED</span><span className="gss-number">PAID OFF</span><span className="gss-number">BALANCE</span><span className="gss-number">ADDED</span><span></span></div>
-          {shortages.map((s) => <div className="gss-row shortage-grid" key={s.employeeId}>
-            <span>{s.name}</span>
-            <span className="gss-number">{Number(s.amountOwed).toLocaleString("en-UG")}</span>
-            <span className="gss-number gss-payment-cell"><strong className="gss-paid-total">{Number(s.paidOff || 0).toLocaleString("en-UG")}</strong><span className="gss-payment-entry"><input inputMode="numeric" aria-label={`New payment for ${s.name}`} value={formatEntry(paymentInputs[s.employeeId] || "")} onChange={(e)=>{const raw=e.target.value.replace(/,/g,""); if(/^\d*$/.test(raw)) setPaymentInputs(v=>({...v,[s.employeeId]:raw}));}} placeholder="Add" disabled={isHistorical || !Number(s.balance)} /><button type="button" onClick={()=>pay(s.employeeId,s.name,s.balance)} disabled={isHistorical || paying===s.employeeId || !Number(s.balance)}>{paying===s.employeeId?"…":"Pay"}</button></span></span>
-            <span className="gss-number">{Number(s.balance).toLocaleString("en-UG")}</span>
-            <span className="gss-number">{Number(s.added).toLocaleString("en-UG")}</span><span></span>
-          </div>)}
-          {!shortages.length && <div className="gss-empty">No shortage balances recorded.</div>}
-          {shortages.length > 0 && <div className="gss-shortage-total"><span>Total</span><span>{totalOwed.toLocaleString("en-UG")}</span><span>{totalPaid.toLocaleString("en-UG")}</span><span>{totalBalance.toLocaleString("en-UG")}</span><span>{totalAdded.toLocaleString("en-UG")}</span><span></span></div>}
+      <section className="bps-section bps-remark-section">
+        <div className="bps-section-title">IMBALANCE REMARK</div>
+        <div className="bps-remark-block">
+          <div className="bps-remark-source">SUPERVISOR REMARK</div>
+          <div className="bps-remark-text">{imbalanceRemark || "No imbalance remark has been recorded for this business date."}</div>
+          <div className="bps-remark-footnote">
+            This report is read-only. The remark will be entered through the Supervisor Imbalance Remark module for the selected branch and business date.
+          </div>
         </div>
-        <div className="gss-shortage-note">Added is generated automatically from Till Balancing SHORT events. Amount Owed is the current outstanding amount after previous payments, Paid Off shows payments recorded for the selected date, and Balance is the current amount still owed. Historical shortage and payment records remain preserved.</div>
       </section>
 
-      <section className="gss-report-panel gss-full-panel gss-history-section">
-        <div className="gss-report-title">HISTORY STATUS</div>
-        <div className="gss-table gss-history-table">
-          <div className="gss-row gss-head gss-history-grid"><span>Date</span><span className="gss-number">Actual Capital</span><span className="gss-number">Difference</span><span>Status</span><span>Reason</span></div>
-          {history.map((h,i)=>{
-            const historicalDate = String(h.business_date || "").slice(0,10);
-            const selected = historicalDate === date;
-            return <button type="button" className={`gss-row gss-history-grid gss-history-row ${selected ? "selected" : ""}`} key={`${historicalDate}-${i}`} onClick={()=>historicalDate && setDate(historicalDate)} aria-label={`Open General Shop Status for ${historicalDate}`}>
-              <span>{historicalDate||"—"}</span>
-              <span className="gss-number">{money(h.actual_capital)}</span>
-              <span className={`gss-number ${Number(h.difference||0)<0?"negative":Number(h.difference||0)>0?"positive":""}`}>{Number(h.difference||0)===0?money(0):`${Number(h.difference)<0?"−":"+"}UGX ${Math.abs(Number(h.difference)).toLocaleString("en-UG")}`}</span>
-              <span className={`gss-status-tag ${String(h.status||"").toLowerCase()}`}>{h.status||"—"}</span>
-              <span>{h.reason||"—"}</span>
-            </button>;
+      <section className="bps-section">
+        <div className="bps-section-title">TILL PERFORMANCE</div>
+        <div className="bps-table">
+          <div className="bps-table-row bps-table-head bps-till-grid">
+            <span>TILL</span><span>ATTENDANT</span><span className="bps-number">OPERATING CAPITAL</span>
+            <span className="bps-number">ACTUAL CAPITAL</span><span className="bps-number">DIFFERENCE</span><span>STATUS</span>
+          </div>
+          {tills.map((item, index) => {
+            const balance = item.balance;
+            const diff = Number(balance?.difference || 0);
+            const tillStatus = balance?.status || "NOT BALANCED";
+            return (
+              <div className="bps-table-row bps-till-grid" key={item.till?.id || index}>
+                <span>{item.till?.name || "—"}</span>
+                <span>{balance?.attendant_name || "—"}</span>
+                <span className="bps-number">{balance ? money(balance.operating_capital) : "—"}</span>
+                <span className="bps-number">{balance ? money(balance.actual_till_capital) : "—"}</span>
+                <span className={`bps-number ${diff < 0 ? "negative" : diff > 0 ? "positive" : ""}`}>
+                  {balance ? (diff === 0 ? money(0) : `${diff < 0 ? "−" : "+"}${money(Math.abs(diff))}`) : "—"}
+                </span>
+                <span className={`bps-status ${String(tillStatus).toLowerCase().replace(/\s+/g, "-")}`}>{tillStatus}</span>
+              </div>
+            );
           })}
-          {!history.length && <div className="gss-empty">No historical branch status records yet.</div>}
+          {!tills.length && <div className="bps-empty-row">No Till records available for this date.</div>}
         </div>
       </section>
+
+      <section className="bps-section">
+        <div className="bps-section-title">DAILY TRANSACTION ACTIVITY</div>
+        <div className="bps-transaction-compact">
+          {dailyTransactions.map((item, index) => (
+            <div className="bps-transaction-item" key={`${item.terminal_id || item.terminal_name}-${index}`}>
+              <span>{item.terminal_name || "—"}</span>
+              <strong>{Number(item.transactionCount || 0).toLocaleString("en-UG")}</strong>
+            </div>
+          ))}
+          {!dailyTransactions.length && <div className="bps-empty-row">No Daily Transactions recorded.</div>}
+          <div className="bps-transaction-total">
+            <span>TOTAL TRANSACTIONS</span>
+            <strong>{totalTransactions.toLocaleString("en-UG")}</strong>
+          </div>
+        </div>
+      </section>
+
+      <section className="bps-section">
+        <div className="bps-section-title">CLOSING FLOAT</div>
+        <div className="bps-float-compact">
+          {positions.map((position, index) => (
+            <div className="bps-float-item" key={`${position.terminal_name}-${index}`}>
+              <span>{position.terminal_name || "—"}</span>
+              <strong>{money(position.amount)}</strong>
+            </div>
+          ))}
+          {!positions.length && <div className="bps-empty-row">No closing float recorded.</div>}
+          <div className="bps-float-total">
+            <span>TOTAL FLOAT</span><strong>{money(totalFloat)}</strong>
+          </div>
+        </div>
+      </section>
+
+      <section className="bps-section">
+        <div className="bps-section-title">CASH BOOK POSITION</div>
+        <div className="bps-cashbook-grid">
+          <div><span>OPENING BALANCE</span><strong>{money(cashBook.openingBalance)}</strong></div>
+          <div><span>TODAY'S TOP UPS</span><strong className="positive">{money(cashBook.dailyTopUps)}</strong></div>
+          <div><span>TODAY'S EXPENSES</span><strong className="negative">{money(cashBook.dailyExpenses)}</strong></div>
+          <div><span>NET DAILY MOVEMENT</span><strong className={Number(cashBook.dailyNetMovement || 0) < 0 ? "negative" : Number(cashBook.dailyNetMovement || 0) > 0 ? "positive" : ""}>{money(cashBook.dailyNetMovement)}</strong></div>
+          <div className="bps-cashbook-closing"><span>CASH BOOK CLOSING BALANCE</span><strong>{money(cashBook.closingBalance)}</strong></div>
+        </div>
+
+        <div className="bps-expense-subsection">
+          <div className="bps-expense-heading">EXPENSES RECORDED ON {date}</div>
+          <div className="bps-expense-table">
+            <div className="bps-expense-row bps-expense-head">
+              <span>CATEGORY</span><span>DESCRIPTION</span><span className="bps-number">AMOUNT</span>
+            </div>
+            {cashBookExpenses.map((expense) => (
+              <div className="bps-expense-row" key={expense.id}>
+                <span>{expense.category || "Other"}</span>
+                <span>{expense.description || "—"}</span>
+                <strong className="bps-number negative">{money(expense.amount)}</strong>
+              </div>
+            ))}
+            {!cashBookExpenses.length && (
+              <div className="bps-empty-row">No Cash Book expenses were recorded for the selected business date.</div>
+            )}
+            <div className="bps-expense-row bps-total-row">
+              <strong>TOTAL EXPENSES</strong><span></span><strong className="bps-number negative">{money(cashBook.dailyExpenses)}</strong>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="bps-section">
+        <div className="bps-section-title">ACCESSORIES</div>
+        <div className="bps-statement">
+          <div className="bps-line">
+            <span>Accessories Activity / Sales</span>
+            <span className="bps-number" style={{ fontWeight: 800, fontSize: "1.2rem" }}>{money(data?.accessoriesCount || 0)}</span>
+          </div>
+        </div>
+        <div className="bps-remark-footnote">
+          Source: Supervisor Accessories module. Until that module is introduced, this report remains compatible with the existing branch status source.
+        </div>
+      </section>
+
+      <section className="bps-section">
+        <div className="bps-section-title">SHORTAGE & RECOVERY</div>
+        <div className="bps-table">
+          <div className="bps-table-row bps-table-head bps-shortage-grid">
+            <span>EMPLOYEE</span><span>TILL</span><span className="bps-number">INCURRED</span>
+            <span className="bps-number">RECOVERED</span><span className="bps-number">OUTSTANDING</span><span className="bps-number">TODAY'S SHORTAGE</span>
+          </div>
+          {shortages.map((item) => (
+            <div className="bps-table-row bps-shortage-grid" key={item.employeeId}>
+              <span>{item.name}</span>
+              <span>{item.tillName || "—"}</span>
+              <span className="bps-number">{money(item.totalIncurred)}</span>
+              <span className="bps-number positive">{money(item.recoveredToDate)}</span>
+              <span className={`bps-number ${Number(item.balance || 0) > 0 ? "negative" : ""}`}>{money(item.balance)}</span>
+              <span className="bps-number">{money(item.newShortage)}</span>
+            </div>
+          ))}
+          {shortages.length > 0 && (
+            <div className="bps-table-row bps-total-row bps-shortage-grid">
+              <strong>TOTAL</strong><span></span>
+              <strong className="bps-number">{money(totalShortageIncurred)}</strong>
+              <strong className="bps-number positive">{money(totalShortageRecovered)}</strong>
+              <strong className="bps-number negative">{money(totalShortageOutstanding)}</strong>
+              <strong className="bps-number">{money(totalTodayShortage)}</strong>
+            </div>
+          )}
+          {!shortages.length && <div className="bps-empty-row">No shortage or recovery records available for the selected date.</div>}
+        </div>
+        <div className="bps-footnote">
+          TODAY'S SHORTAGE is the sum of all SHORT Till Balance events recorded for the selected business date. Each balancing event is treated as its own shortage event; it is not the employee's total outstanding debt. Recovery reduces outstanding debt through explicit settlement allocations.
+        </div>
+      </section>
+
+      <section className="bps-section">
+        <div className="bps-section-title">MANAGEMENT ATTENTION</div>
+        <div className="bps-attention">
+          {tills.filter((item) => String(item.balance?.status || "").toUpperCase() === "SHORT").map((item) => (
+            <div key={`short-${item.till?.id}`}>• {item.till?.name || "Till"} — shortage requires attention.</div>
+          ))}
+          {tills.filter((item) => String(item.balance?.status || "").toUpperCase() === "EXCESS").map((item) => (
+            <div key={`excess-${item.till?.id}`}>• {item.till?.name || "Till"} — excess recorded.</div>
+          ))}
+          {shortages.filter((item) => Number(item.balance || 0) > 0).map((item) => (
+            <div key={`debt-${item.employeeId}`}>• {item.name} — outstanding shortage of {money(item.balance)}.</div>
+          ))}
+          {!tills.some((item) => ["SHORT", "EXCESS"].includes(String(item.balance?.status || "").toUpperCase()))
+            && !shortages.some((item) => Number(item.balance || 0) > 0)
+            && <div>• No outstanding balancing exceptions for the selected date.</div>}
+        </div>
+      </section>
+
+      <section className="bps-section bps-history-section">
+        <div className="bps-section-title">REPORT HISTORY</div>
+        <div className="bps-table">
+          <div className="bps-table-row bps-table-head bps-history-grid">
+            <span>DATE</span><span className="bps-number">ACTUAL CAPITAL</span><span className="bps-number">DIFFERENCE</span><span>STATUS</span><span>IMBALANCE REMARK</span>
+          </div>
+          {history.map((entry, index) => {
+            const historicalDate = String(entry.business_date || "").slice(0, 10);
+            const selected = historicalDate === date;
+            const diff = Number(entry.difference || 0);
+            return (
+              <button type="button" className={`bps-table-row bps-history-grid bps-history-row ${selected ? "selected" : ""}`} key={`${historicalDate}-${index}`} onClick={() => historicalDate && setDate(historicalDate)}>
+                <span>{historicalDate || "—"}</span>
+                <span className="bps-number">{money(entry.actual_capital)}</span>
+                <span className={`bps-number ${diff < 0 ? "negative" : diff > 0 ? "positive" : ""}`}>
+                  {diff === 0 ? money(0) : `${diff < 0 ? "−" : "+"}${money(Math.abs(diff))}`}
+                </span>
+                <span className={`bps-status ${String(entry.status || "").toLowerCase()}`}>{entry.status || "—"}</span>
+                <span>{entry.reason || "—"}</span>
+              </button>
+            );
+          })}
+          {!history.length && <div className="bps-empty-row">No historical branch status records yet.</div>}
+        </div>
+      </section>
+
+      <footer className="bps-footer">
+        <span>AIRTEL COMMUNICATIONS</span>
+        <span>BRANCH PERFORMANCE REPORT</span>
+        <span>{date}</span>
+      </footer>
     </main>
   );
 }

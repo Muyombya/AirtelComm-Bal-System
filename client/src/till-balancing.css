@@ -99,48 +99,225 @@
   }
 }
 
-
-/* BUILD 040 — Recorded Till Balance status tint */
-.till-balancing-page.till-status-short {
-  background: #fff7f7;
+/* Previous Till shortage settlement */
+.till-balancing-page .shortage-settlement-panel {
+  margin-top: 18px;
 }
 
-.till-balancing-page.till-status-excess {
-  background: #f5fbf7;
-}
-
-.till-balancing-page.till-status-short .context-card,
-.till-balancing-page.till-status-short .panel,
-.till-balancing-page.till-status-short .history-panel {
+.till-balancing-page .shortage-settlement-panel.has-debt {
+  border-color: #e7c5c5;
   background: #fffafa;
-  border-color: #ead1d1;
 }
 
-.till-balancing-page.till-status-excess .context-card,
-.till-balancing-page.till-status-excess .panel,
-.till-balancing-page.till-status-excess .history-panel {
-  background: #f9fcfa;
+.till-balancing-page .shortage-settlement-panel.settled {
   border-color: #cfe3d5;
+  background: #f9fcfa;
 }
 
-.till-balancing-page.till-status-short .result-card.short {
-  background: #fbeaea;
-  border-color: #e4bcbc;
+.shortage-settlement-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 18px 18px;
 }
 
-.till-balancing-page.till-status-excess .result-card.excess {
-  background: #e8f6ec;
-  border-color: #b9d9c2;
+.shortage-settlement-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(130px, 1fr));
+  gap: 14px;
+  flex: 1;
 }
 
-.till-balancing-page.till-status-short .history-row:not(.history-head),
-.till-balancing-page.till-status-excess .history-row:not(.history-head) {
-  background: transparent;
+.shortage-settlement-metrics > div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .till-balancing-page.till-status-short,
-  .till-balancing-page.till-status-excess {
-    transition: background-color 180ms ease;
+.shortage-settlement-metrics span,
+.settlement-detail-grid span {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.shortage-settlement-metrics strong {
+  color: #0f172a;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.shortage-settlement-metrics strong.debt {
+  color: #a33a3a;
+}
+
+.shortage-settlement-metrics strong.settled-value {
+  color: #267348;
+}
+
+.shortage-settlement-action {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.settlement-status {
+  color: #a33a3a;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .05em;
+}
+
+.settled-status {
+  color: #267348;
+}
+
+.settlement-button {
+  white-space: nowrap;
+}
+
+.shortage-settlement-modal {
+  max-width: 620px;
+}
+
+.settlement-detail-grid {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.settlement-detail-grid > div,
+.settlement-detail-grid > label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.settlement-detail-grid strong {
+  font-size: 20px;
+  color: #0f172a;
+}
+
+.settlement-detail-grid input {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 42px;
+}
+
+@media (max-width: 900px) {
+  .shortage-settlement-body {
+    align-items: stretch;
+    flex-direction: column;
   }
+
+  .shortage-settlement-metrics {
+    grid-template-columns: repeat(2, minmax(130px, 1fr));
+  }
+
+  .shortage-settlement-action {
+    justify-content: space-between;
+  }
+}
+
+@media (max-width: 520px) {
+  .shortage-settlement-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .shortage-settlement-action {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+.till-balancing-page .shortage-settlement-metrics > div:last-child {
+  border-left: 1px solid #e5e7eb;
+  padding-left: 18px;
+}
+@media (max-width: 700px) {
+  .till-balancing-page .shortage-settlement-metrics > div:last-child {
+    border-left: 0;
+    padding-left: 0;
+    border-top: 1px solid #e5e7eb;
+    padding-top: 12px;
+  }
+}
+
+/* Till Shortage Counter event ledger */
+.shortage-events-section,
+.shortage-payments-section {
+  padding: 0 18px 18px;
+}
+
+.shortage-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.shortage-section-heading > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.shortage-section-heading strong {
+  color: #0f172a;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+.shortage-section-heading span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.shortage-events-table {
+  overflow-x: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.shortage-event-row {
+  display: grid;
+  grid-template-columns: 1.1fr 1.2fr 1.15fr 1.15fr 1.15fr .8fr;
+  min-width: 760px;
+  border-top: 1px solid #edf0f2;
+}
+
+.shortage-event-row:first-child { border-top: 0; }
+
+.shortage-event-row > span {
+  padding: 10px 11px;
+  font-size: 12px;
+  color: #334155;
+}
+
+.shortage-event-head {
+  background: #f8fafc;
+  border-top: 0;
+}
+
+.shortage-event-head > span {
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.shortage-event-row .debt { color: #a33a3a; font-weight: 800; }
+.shortage-event-row .settled-value { color: #267348; font-weight: 800; }
+
+.shortage-payments-table .shortage-event-row {
+  grid-template-columns: 1fr 1.25fr 1fr 1.4fr 1.35fr;
+  min-width: 680px;
 }

@@ -40,14 +40,25 @@ export async function getCashBook(req, res, next) {
        FROM cash_book_entries cbe LEFT JOIN employees e ON e.id=cbe.created_by
        WHERE cbe.branch_id=$1 AND cbe.business_date=$2
        ORDER BY cbe.entered_at ASC, cbe.id ASC`, [branchId, date]);
-    const openingBalance = Number(account.rows[0]?.opening_balance || 0);
+    // cash_book_accounts.opening_balance is the branch's original/base opening balance.
+    // For each working day, the opening balance must roll forward from the previous
+    // working day's closing balance instead of repeating that original amount.
+    const baseOpeningBalance = Number(account.rows[0]?.opening_balance || 0);
+    const priorEntries = await pool.query(
+      `SELECT COALESCE(SUM(amount) FILTER (WHERE entry_type='TOP_UP'),0)::NUMERIC(18,2) AS total_top_ups,
+              COALESCE(SUM(amount) FILTER (WHERE entry_type='EXPENSE'),0)::NUMERIC(18,2) AS total_expenses
+       FROM cash_book_entries WHERE branch_id=$1 AND business_date < $2`, [branchId, date]);
+    const priorTopUps = Number(priorEntries.rows[0]?.total_top_ups || 0);
+    const priorExpenses = Number(priorEntries.rows[0]?.total_expenses || 0);
+    const openingBalance = baseOpeningBalance + priorTopUps - priorExpenses;
+
     const allEntries = await pool.query(
       `SELECT COALESCE(SUM(amount) FILTER (WHERE entry_type='TOP_UP'),0)::NUMERIC(18,2) AS total_top_ups,
               COALESCE(SUM(amount) FILTER (WHERE entry_type='EXPENSE'),0)::NUMERIC(18,2) AS total_expenses
        FROM cash_book_entries WHERE branch_id=$1 AND business_date <= $2`, [branchId, date]);
     const totalTopUps = Number(allEntries.rows[0]?.total_top_ups || 0);
     const totalExpenses = Number(allEntries.rows[0]?.total_expenses || 0);
-    const closingBalance = openingBalance + totalTopUps - totalExpenses;
+    const closingBalance = baseOpeningBalance + totalTopUps - totalExpenses;
     const daily = entries.rows.reduce((summary, row) => {
       const amount = Number(row.amount || 0);
       if (row.entry_type === "TOP_UP") summary.topUps += amount;
