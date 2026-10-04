@@ -64,7 +64,17 @@ export async function getMonthlyExpenseReport(req,res,next){
       branches:branches.rows.map(x=>({id:Number(x.id),name:x.name,expenses:Number(x.expenses),entries:Number(x.entries)})),
       company:{amount:Number(company.rows[0]?.amount||0),entries:Number(company.rows[0]?.entries||0)},
       highlights:{mostFrequentBranchExpense:frequentBranch.rows[0]?{category:frequentBranch.rows[0].category,entries:Number(frequentBranch.rows[0].entries),amount:Number(frequentBranch.rows[0].amount)}:null,highestBranchExpense:highestBranch.rows[0]?{category:highestBranch.rows[0].category,entries:Number(highestBranch.rows[0].entries),amount:Number(highestBranch.rows[0].amount)}:null},
-      entries:entries.map(x=>({...x,id:Number(x.id),branch_id:x.branch_id===null?null:Number(x.branch_id),amount:Number(x.amount),business_date:String(x.business_date).slice(0,10)}))});
+      entries:entries.map(x=>({
+        id:Number(x.id),
+        branch_id:x.branch_id===null?null:Number(x.branch_id),
+        amount:Number(x.amount),
+        businessDate:String(x.business_date).slice(0,10),
+        business_date:String(x.business_date).slice(0,10),
+        branchName:x.branch_name||null,
+        expenseScope:x.expense_scope,
+        category:x.category||"Other",
+        description:x.description||null
+      }))});
   } catch(e){next(e);}
 }
 

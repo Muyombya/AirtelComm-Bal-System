@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import "../cash-book-report.css";
 import {
   getBranches, getCashBook, saveCashBookOpeningBalance, createCashBookEntry,
   getCashBookHistory, getCashBookExpenseCategories, getCashBookMonthlyExpenses,
@@ -18,6 +19,8 @@ export default function CashBook({ user }) {
   const [ledger,setLedger]=useState(null); const [ledgerScope,setLedgerScope]=useState("ALL"); const [ledgerLoading,setLedgerLoading]=useState(true);
   const [opening,setOpening]=useState(""); const [entry,setEntry]=useState({type:"EXPENSE",scope:"BRANCH",amount:"",category:"",description:""});
   const [loading,setLoading]=useState(true); const [reportLoading,setReportLoading]=useState(true); const [busy,setBusy]=useState(false); const [message,setMessage]=useState(""); const [error,setError]=useState("");
+  const [emailOpen,setEmailOpen]=useState(false); const [emailSending,setEmailSending]=useState(false);
+  const [emailForm,setEmailForm]=useState({to:"",cc:"",subject:"",message:""});
   const allBranches=branchId==="all"; const companyView=branchId==="company"; const selectedBranch=branches.find(b=>String(b.id)===String(branchId));
 
   useEffect(()=>{
@@ -49,6 +52,33 @@ export default function CashBook({ user }) {
   useEffect(()=>{if(branchReady)loadLedger();},[branchId,reportMonth,ledgerScope,branchReady]);
   const openingLocked=useMemo(()=>Number(data?.openingBalance||0)>0||Boolean(data?.openingSetAt),[data]);
   async function saveOpening(){setBusy(true);setError("");setMessage("");try{await saveCashBookOpeningBalance(Number(branchId),Number(rawNumber(opening)||0));setMessage("Cash Book Opening Balance saved successfully.");await load();}catch(e){setError(e?.message||"Failed to save Opening Balance.");}finally{setBusy(false);}}
+  function openEmailDialog(){
+    const branchName=allBranches?"All Branches + Company":companyView?"Company / Central":selectedBranch?.name||user?.branch_name||"Branch";
+    setEmailForm({to:"",cc:"",subject:`Cash Book Expenditure Report - ${branchName} - ${reportMonth}`,message:`Please find attached the Cash Book Expenditure Report for ${branchName} for ${reportMonth}.`});
+    setError("");
+    setEmailOpen(true);
+  }
+
+  async function sendReportEmail(e){
+    e.preventDefault();
+    setEmailSending(true);
+    setError("");
+    setMessage("");
+    try{
+      const base=import.meta.env.VITE_API_BASE_URL||"http://localhost:5000/api";
+      const response=await fetch(`${base}/cash-book/monthly-expenses/email`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json",...(localStorage.getItem("authToken")?{Authorization:`Bearer ${localStorage.getItem("authToken")}`}:{})},
+        body:JSON.stringify({branchId,month:reportMonth,...emailForm})
+      });
+      let result=null; try{result=await response.json();}catch{}
+      if(!response.ok){throw new Error(result?.error||result?.message||"Failed to email Cash Book Expenditure Report.");}
+      setEmailOpen(false);
+      setMessage(result?.message||"Cash Book Expenditure Report emailed successfully.");
+    }catch(e){setError(e?.message||"Failed to email Cash Book Expenditure Report.");}
+    finally{setEmailSending(false);}
+  }
+
   async function saveEntry(e){e.preventDefault();setBusy(true);setError("");setMessage("");try{const effectiveScope=user?.role==="SUPERVISOR"?"BRANCH":entry.scope; const isCompany=entry.type==="EXPENSE"&&effectiveScope==="COMPANY";await createCashBookEntry({branchId:isCompany?null:Number(branchId),entryType:entry.type,expenseScope:entry.type==="EXPENSE"?effectiveScope:"BRANCH",amount:Number(rawNumber(entry.amount)||0),category:entry.type==="EXPENSE"?entry.category:null,description:String(entry.description??"").trim()||null,businessDate:date});setEntry({type:"EXPENSE",scope:"BRANCH",amount:"",category:categories[0]?.name||"",description:""});setMessage(isCompany?"Company expense recorded successfully.":entry.type==="EXPENSE"?"Expense recorded successfully.":"Funds added successfully.");await Promise.all([load(),loadMonthly(),loadLedger()]);}catch(e){setError(e?.message||"Failed to save Cash Book entry.");}finally{setBusy(false);}}
 
   if(!branchReady && !loading) return (
@@ -80,15 +110,112 @@ export default function CashBook({ user }) {
 
       <section className="cash-book-panel cash-book-ledger-panel"><div className="cash-book-title">EXPENSE LEDGER — {allBranches?"ALL BRANCHES + COMPANY":companyView?"COMPANY / CENTRAL":selectedBranch?.name||"BRANCH"}</div><div className="cash-book-ledger-controls"><label>Ledger Month<input type="month" max={currentMonth} value={reportMonth} onChange={e=>setReportMonth(e.target.value)}/></label><label>Scope<select value={ledgerScope} onChange={e=>setLedgerScope(e.target.value)}><option value="ALL">All Expenses</option><option value="BRANCH">Branch Expenses</option><option value="COMPANY">Company / Central</option></select></label></div>{ledgerLoading?<div className="cash-book-empty">Loading expense ledger…</div>:<><div className="cash-book-ledger-summary"><div><span>Entries</span><strong>{ledger?.summary?.entries||0}</strong></div><div><span>Branch Expenses</span><strong>{money(ledger?.summary?.branchAmount)}</strong></div><div><span>Company / Central</span><strong>{money(ledger?.summary?.companyAmount)}</strong></div><div className="cash-book-combined"><span>Ledger Total</span><strong>{money(ledger?.summary?.amount)}</strong></div></div><div className="cash-book-table cash-book-expense-ledger"><div className="cash-book-row cash-book-head"><span>Date</span><span>Scope / Branch</span><span>Category</span><span>Description</span><span>Amount</span></div>{ledger?.entries?.map(x=><div className="cash-book-row" key={x.id}><span>{x.businessDate}</span><span>{x.expenseScope==="COMPANY"?"Company / Central":x.branchName||"Branch"}</span><span>{x.category||"Other"}</span><span>{x.description||"—"}</span><strong>{money(x.amount)}</strong></div>)}{!ledger?.entries?.length&&<div className="cash-book-empty">No expenses recorded for the selected month and scope.</div>}</div></>}</section>
 
-      <section className="cash-book-panel"><div className="cash-book-title">MONTHLY EXPENSE RECONCILIATION</div><div className="cash-book-report-controls"><label>Month<input type="month" max={currentMonth} value={reportMonth} onChange={e=>setReportMonth(e.target.value)}/></label></div>{reportLoading?<div className="cash-book-empty">Loading monthly report…</div>:<>
-        <div className="cash-book-month-summary"><div><span>Branch Expenses</span><strong>{money(monthly?.summary?.branchExpenses)}</strong></div><div><span>Company / Central</span><strong>{money(monthly?.summary?.companyExpenses)}</strong></div><div className="cash-book-combined"><span>Combined Expenses</span><strong>{money(monthly?.summary?.combinedExpenses)}</strong></div></div>
-        {monthly?.highlights?.mostFrequentBranchExpense&&<div className="cash-book-highlight"><strong>Most Frequent Branch Expense:</strong> {monthly.highlights.mostFrequentBranchExpense.category} · {monthly.highlights.mostFrequentBranchExpense.entries} entries · {money(monthly.highlights.mostFrequentBranchExpense.amount)}</div>}
-        {monthly?.highlights?.highestBranchExpense&&<div className="cash-book-highlight"><strong>Highest Branch Expense by Amount:</strong> {monthly.highlights.highestBranchExpense.category} · {money(monthly.highlights.highestBranchExpense.amount)} · {monthly.highlights.highestBranchExpense.entries} entries</div>}
-        {(allBranches)&&<><div className="cash-book-subtitle">EXPENSES BY BRANCH</div><div className="cash-book-table"><div className="cash-book-row cash-book-head cash-book-branch-row"><span>Branch</span><span>Entries</span><span>Monthly Expenses</span></div>{monthly?.branches?.map(x=><div className="cash-book-row cash-book-branch-row" key={x.id}><span>{x.name}</span><span>{x.entries}</span><strong>{money(x.expenses)}</strong></div>)}{monthly?.company&&<div className="cash-book-row cash-book-branch-row cash-book-company-row"><span>Company / Central</span><span>{monthly.company.entries}</span><strong>{money(monthly.company.amount)}</strong></div>}</div></>}
-        <div className="cash-book-subtitle">EXPENSE BY CATEGORY</div><div className="cash-book-table cash-book-category-table"><div className="cash-book-row cash-book-head"><span>Category</span><span>Entries</span><span>Amount</span></div>{monthly?.categories?.map(x=><div className="cash-book-row" key={x.category}><span>{x.category}</span><span>{x.entries}</span><strong>{money(x.amount)}</strong></div>)}{!monthly?.categories?.length&&<div className="cash-book-empty">No expenses recorded for this month.</div>}</div>
-        <div className="cash-book-subtitle">DAILY EXPENSES</div><div className="cash-book-table cash-book-daily-table"><div className="cash-book-row cash-book-head"><span>Date</span><span>Entries</span><span>Daily Total</span></div>{monthly?.daily?.map(x=><div className="cash-book-row" key={x.businessDate}><span>{x.businessDate}</span><span>{x.entries}</span><strong>{money(x.amount)}</strong></div>)}</div>
-      </>}</section>
+      <section className="cash-book-report-document">
+        <header className="cash-book-report-header">
+          <div className="cash-book-report-heading">
+            <div className="cash-book-report-company">AIRTEL COMMUNICATIONS</div>
+            <h2>{String(allBranches ? "ALL BRANCHES + COMPANY" : companyView ? "COMPANY / CENTRAL" : selectedBranch?.name || "BRANCH").toUpperCase()} CASH BOOK EXPENDITURE REPORT</h2>
+            <p>Monthly expenditure and cash control statement</p>
+          </div>
+          <div className="cash-book-report-actions">
+            <button type="button" onClick={()=>window.print()}>Print PDF</button>
+            <button type="button" onClick={openEmailDialog} disabled={reportLoading||!monthly}>Email Report</button>
+          </div>
+        </header>
+
+        <div className="cash-book-report-meta">
+          <div><span>REPORTING MONTH</span><strong>{reportMonth}</strong></div>
+          <div><span>BRANCH / SCOPE</span><strong>{allBranches?"ALL BRANCHES + COMPANY":companyView?"COMPANY / CENTRAL":selectedBranch?.name||"BRANCH"}</strong></div>
+          <div><span>REPORT TYPE</span><strong>MONTHLY EXPENDITURE</strong></div>
+        </div>
+
+        <div className="cash-book-report-status">MONTHLY EXPENDITURE REPORT <span>READ-ONLY REPORT</span></div>
+
+        {reportLoading ? <div className="cash-book-empty">Loading monthly report…</div> : <>
+          <section className="cash-book-report-section">
+            <div className="cash-book-report-section-title">MONTHLY CASH BOOK POSITION</div>
+            <div className="cash-book-report-statement">
+              <div className="cash-book-report-line cash-book-report-column-head"><span>POSITION</span><span>AMOUNT</span></div>
+              <div className="cash-book-report-line"><span>Funds Added</span><strong>{money(monthly?.summary?.fundsAdded)}</strong></div>
+              <div className="cash-book-report-line"><span>Branch Expenses</span><strong>{money(monthly?.summary?.branchExpenses)}</strong></div>
+              <div className="cash-book-report-line"><span>Company / Central Expenses</span><strong>{money(monthly?.summary?.companyExpenses)}</strong></div>
+              <div className="cash-book-report-line cash-book-report-subtotal"><span>Combined Expenditure</span><strong>{money(monthly?.summary?.combinedExpenses)}</strong></div>
+              <div className="cash-book-report-line cash-book-report-emphasis"><span>Net Movement</span><strong>{money(monthly?.summary?.netMovement)}</strong></div>
+            </div>
+          </section>
+
+          <section className="cash-book-report-section">
+            <div className="cash-book-report-section-title">KEY BRANCH EXPENSE FINDINGS</div>
+            <div className="cash-book-report-statement">
+              <div className="cash-book-report-line cash-book-report-column-head"><span>FINDING</span><span>RESULT</span></div>
+              <div className="cash-book-report-line cash-book-report-finding">
+                <span>Highest Branch Expense by Amount</span>
+                <strong>{monthly?.highlights?.highestBranchExpense ? `${monthly.highlights.highestBranchExpense.category} · ${money(monthly.highlights.highestBranchExpense.amount)} · ${monthly.highlights.highestBranchExpense.entries} entries` : "No branch expense recorded"}</strong>
+              </div>
+              <div className="cash-book-report-line cash-book-report-finding">
+                <span>Most Frequent Branch Expense</span>
+                <strong>{monthly?.highlights?.mostFrequentBranchExpense ? `${monthly.highlights.mostFrequentBranchExpense.category} · ${monthly.highlights.mostFrequentBranchExpense.entries} entries · ${money(monthly.highlights.mostFrequentBranchExpense.amount)}` : "No branch expense recorded"}</strong>
+              </div>
+            </div>
+          </section>
+
+          {allBranches && <section className="cash-book-report-section">
+            <div className="cash-book-report-section-title">EXPENSES BY BRANCH</div>
+            <div className="cash-book-report-table">
+              <div className="cash-book-report-table-row cash-book-report-table-head"><span>BRANCH</span><span>ENTRIES</span><span>EXPENDITURE</span></div>
+              {monthly?.branches?.map(x=><div className="cash-book-report-table-row" key={x.id||x.name}><span>{x.name}</span><span>{x.entries}</span><strong>{money(x.expenses)}</strong></div>)}
+              {monthly?.company&&<div className="cash-book-report-table-row cash-book-report-total"><span>Company / Central</span><span>{monthly.company.entries}</span><strong>{money(monthly.company.amount)}</strong></div>}
+            </div>
+          </section>}
+
+          <section className="cash-book-report-section">
+            <div className="cash-book-report-section-title">EXPENSE BY CATEGORY</div>
+            <div className="cash-book-report-table">
+              <div className="cash-book-report-table-row cash-book-report-table-head"><span>CATEGORY</span><span>ENTRIES</span><span>AMOUNT</span></div>
+              {monthly?.categories?.map(x=><div className="cash-book-report-table-row" key={x.category}><span>{x.category}</span><span>{x.entries}</span><strong>{money(x.amount)}</strong></div>)}
+              {!monthly?.categories?.length&&<div className="cash-book-empty">No expenses recorded for this month.</div>}
+            </div>
+          </section>
+
+          <section className="cash-book-report-section">
+            <div className="cash-book-report-section-title">DAILY EXPENDITURE</div>
+            <div className="cash-book-report-table">
+              <div className="cash-book-report-table-row cash-book-report-table-head"><span>DATE</span><span>ENTRIES</span><span>DAILY TOTAL</span></div>
+              {monthly?.daily?.map(x=><div className="cash-book-report-table-row" key={x.businessDate}><span>{x.businessDate}</span><span>{x.entries}</span><strong>{money(x.amount)}</strong></div>)}
+            </div>
+          </section>
+
+          <section className="cash-book-report-section">
+            <div className="cash-book-report-section-title">DETAILED EXPENDITURE</div>
+            <div className="cash-book-report-table cash-book-report-detail-table">
+              <div className="cash-book-report-table-row cash-book-report-table-head"><span>DATE</span><span>SCOPE / BRANCH</span><span>CATEGORY</span><span>DESCRIPTION</span><span>AMOUNT</span></div>
+              {monthly?.entries?.map((x,i)=><div className="cash-book-report-table-row" key={`${x.businessDate}-${x.category}-${i}`}><span>{x.businessDate}</span><span>{x.expenseScope==="COMPANY"?"Company / Central":x.branchName||"Branch"}</span><span>{x.category||"Other"}</span><span>{x.description||"—"}</span><strong>{money(x.amount)}</strong></div>)}
+              {!monthly?.entries?.length&&<div className="cash-book-empty">No expenditure entries recorded for this month.</div>}
+            </div>
+          </section>
+
+          <footer className="cash-book-report-footer">
+            <span>AIRTEL COMMUNICATIONS</span>
+            <span>CASH BOOK EXPENDITURE REPORT</span>
+            <span>{reportMonth}</span>
+          </footer>
+        </>}
+      </section>
+
       {!allBranches&&!companyView&&<section className="cash-book-panel"><div className="cash-book-title">TODAY'S CASH BOOK ENTRIES</div><div className="cash-book-table"><div className="cash-book-row cash-book-head"><span>Date / Time</span><span>Type / Category</span><span>Description</span><span>Amount</span></div>{history.map(x=><div className="cash-book-row" key={x.id}><span>{new Date(x.entered_at).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</span><span>{x.entry_type==="EXPENSE"?x.category||"Expense":"Funds Added"}</span><span>{x.description||"—"}</span><strong>{money(x.amount)}</strong></div>)}{!history.length&&<div className="cash-book-empty">No Cash Book history yet.</div>}</div></section>}
     </>}
+    {emailOpen&&<div className="cash-book-email-overlay" role="dialog" aria-modal="true" aria-labelledby="cash-book-email-title">
+      <form className="cash-book-email-dialog" onSubmit={sendReportEmail}>
+        <div className="cash-book-email-header">
+          <div><h2 id="cash-book-email-title">Email Cash Book Expenditure Report</h2><p>{allBranches?"All Branches + Company":companyView?"Company / Central":selectedBranch?.name||user?.branch_name||"Branch"} • {reportMonth}</p></div>
+          <button type="button" className="cash-book-email-close" onClick={()=>setEmailOpen(false)} aria-label="Close">×</button>
+        </div>
+        <div className="cash-book-email-field"><label htmlFor="cash-book-email-to">To</label><div className="cash-book-email-help">Separate multiple addresses with commas</div><input id="cash-book-email-to" required value={emailForm.to} onChange={e=>setEmailForm(v=>({...v,to:e.target.value}))} placeholder="recipient@example.com" autoFocus /></div>
+        <div className="cash-book-email-field"><label htmlFor="cash-book-email-cc">CC <span>Optional</span></label><input id="cash-book-email-cc" value={emailForm.cc} onChange={e=>setEmailForm(v=>({...v,cc:e.target.value}))} placeholder="cc@example.com" /></div>
+        <div className="cash-book-email-field"><label htmlFor="cash-book-email-subject">Subject</label><input id="cash-book-email-subject" required value={emailForm.subject} onChange={e=>setEmailForm(v=>({...v,subject:e.target.value}))} /></div>
+        <div className="cash-book-email-field"><label htmlFor="cash-book-email-message">Message</label><textarea id="cash-book-email-message" rows="5" value={emailForm.message} onChange={e=>setEmailForm(v=>({...v,message:e.target.value}))} /></div>
+        <div className="cash-book-email-actions"><button type="button" onClick={()=>setEmailOpen(false)} disabled={emailSending}>Cancel</button><button type="submit" disabled={emailSending}>{emailSending?"Sending…":"Send Report"}</button></div>
+      </form>
+    </div>}
   </main>;
 }
