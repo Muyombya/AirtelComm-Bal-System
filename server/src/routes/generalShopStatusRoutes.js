@@ -1,8 +1,11 @@
 import { Router } from "express";
 import { requireBranchAccess, requireSupervisorAccess } from "../middleware/auth.js";
 import { getGeneralShopStatus, saveGeneralShopStatus, recordShortagePayment } from "../controllers/generalShopStatusController.js";
+import { emailGeneralShopStatus, generateGeneralShopStatusPdf } from "../controllers/generalShopStatusEmailController.js";
 const router=Router();
 router.get("/general-shop-status",requireSupervisorAccess,requireBranchAccess,getGeneralShopStatus);
 router.put("/general-shop-status",requireSupervisorAccess,requireBranchAccess,saveGeneralShopStatus);
 router.post("/branch-shortages/payments",requireSupervisorAccess,requireBranchAccess,recordShortagePayment);
+router.post("/general-shop-status/email-report",requireSupervisorAccess,requireBranchAccess,emailGeneralShopStatus);
+router.get("/general-shop-status/pdf",requireSupervisorAccess,requireBranchAccess,generateGeneralShopStatusPdf);
 export default router;

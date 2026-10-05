@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { getBranches, getGeneralShopStatus } from "../services/api";
+import { getBranches, getGeneralShopStatus, sendGeneralShopStatusEmail, getGeneralShopStatusPdf } from "../services/api";
 import "../branch-performance-status.css";
+import "../general-shop-status-email.css";
 
 const money = (n) => `UGX ${Number(n || 0).toLocaleString("en-UG")}`;
 
@@ -21,6 +22,12 @@ export default function GeneralShopStatus({ user }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [emailSending, setEmailSending] = useState(false);
+  const [emailError, setEmailError] = useState("");
+  const [emailForm, setEmailForm] = useState({ to: "", cc: "", subject: "", message: "" });
+  const [reportMessage, setReportMessage] = useState("");
+  const [printGenerating, setPrintGenerating] = useState(false);
   const isHistorical = date < today;
 
   async function load() {
@@ -71,7 +78,6 @@ export default function GeneralShopStatus({ user }) {
   const dailyTransactions = Array.isArray(data?.dailyTransactions)
     ? data.dailyTransactions
     : [];
-  const history = Array.isArray(data?.history) ? data.history : [];
   const shortages = Array.isArray(data?.shortageCounter) ? data.shortageCounter : [];
   const cashBook = data?.cashBook || {};
   const cashBookExpenses = Array.isArray(cashBook.expenses) ? cashBook.expenses : [];
@@ -103,6 +109,68 @@ export default function GeneralShopStatus({ user }) {
     0
   );
 
+  function openEmailDialog() {
+    setReportMessage("");
+    const branchName = data?.branch?.name || user?.branch_name || "Branch";
+    setEmailError("");
+    setEmailForm({
+      to: "",
+      cc: "",
+      subject: `General Shop Status - ${branchName} - ${date}`,
+      message: `Please find attached the General Shop Status report for ${branchName} for ${date}.`
+    });
+    setEmailOpen(true);
+  }
+
+  async function sendReportEmail(event) {
+    event.preventDefault();
+    setEmailError("");
+    if (!emailForm.to.trim()) {
+      setEmailError("Enter at least one recipient in To.");
+      return;
+    }
+    if (!emailForm.subject.trim()) {
+      setEmailError("Subject is required.");
+      return;
+    }
+    setEmailSending(true);
+    try {
+      await sendGeneralShopStatusEmail(Number(branchId), date, emailForm);
+      setEmailOpen(false);
+      setError("");
+      setReportMessage("Report Sent");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (e) {
+      setEmailError(e?.message || "Failed to email the General Shop Status report.");
+    } finally {
+      setEmailSending(false);
+    }
+  }
+
+  async function handlePrintPdf() {
+    if (!branchId || printGenerating) return;
+    setReportMessage("");
+    setPrintGenerating(true);
+    const printWindow = window.open("", "_blank");
+    try {
+      if (!printWindow) {
+        throw new Error("The PDF window was blocked. Please allow pop-ups for this site and try again.");
+      }
+      printWindow.document.write("<p style='font-family:Arial,sans-serif;padding:24px'>Preparing PDF…</p>");
+      printWindow.document.close();
+      const { blob, filename } = await getGeneralShopStatusPdf(Number(branchId), date);
+      const pdfUrl = URL.createObjectURL(blob);
+      printWindow.location.href = pdfUrl;
+      printWindow.document.title = filename;
+      window.setTimeout(() => URL.revokeObjectURL(pdfUrl), 60000);
+    } catch (e) {
+      if (printWindow && !printWindow.closed) printWindow.close();
+      setReportMessage(e?.message || "Failed to generate the PDF report.");
+    } finally {
+      setPrintGenerating(false);
+    }
+  }
+
   const statusText = useMemo(() => {
     if (status === "BALANCED") return "BALANCED";
     if (status === "INCOMPLETE") return "BALANCING INCOMPLETE";
@@ -127,7 +195,7 @@ export default function GeneralShopStatus({ user }) {
             <p>Daily operating, balancing and recovery statement</p>
           </div>
           <div className="bps-header-actions">
-            <button type="button" className="bps-print-button" onClick={() => window.print()}>
+            <button type="button" className="bps-print-button" onClick={handlePrintPdf}>
               Print PDF
             </button>
             <div className="bps-header-meta">
@@ -164,8 +232,11 @@ export default function GeneralShopStatus({ user }) {
         </div>
 
         <div className="bps-header-actions">
-          <button type="button" className="bps-print-button" onClick={() => window.print()}>
-            Print PDF
+          <button type="button" className="bps-print-button" onClick={handlePrintPdf} disabled={printGenerating}>
+            {printGenerating ? "Preparing PDF…" : "Print PDF"}
+          </button>
+          <button type="button" className="gss-email-button" onClick={openEmailDialog}>
+            Email Report
           </button>
           <div className="bps-header-meta">
             <div>
@@ -187,6 +258,33 @@ export default function GeneralShopStatus({ user }) {
           </div>
         </div>
       </header>
+
+      {reportMessage && (
+        <div
+          className="bps-message success"
+          role="status"
+          aria-live="polite"
+          style={{
+            position: "fixed",
+            top: "20px",
+            right: "20px",
+            zIndex: 99999,
+            margin: 0,
+            padding: "14px 22px",
+            background: "#eaf7ee",
+            color: "#176b35",
+            border: "1px solid #8dcc9e",
+            borderRadius: "6px",
+            boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
+            fontSize: "14px",
+            fontWeight: 800,
+            minWidth: "140px",
+            textAlign: "center"
+          }}
+        >
+          {reportMessage}
+        </div>
+      )}
 
       <div className={`bps-status-bar ${status.toLowerCase()}`}>
         <strong>{statusText}</strong>
@@ -400,31 +498,41 @@ export default function GeneralShopStatus({ user }) {
         </div>
       </section>
 
-      <section className="bps-section bps-history-section">
-        <div className="bps-section-title">REPORT HISTORY</div>
-        <div className="bps-table">
-          <div className="bps-table-row bps-table-head bps-history-grid">
-            <span>DATE</span><span className="bps-number">ACTUAL CAPITAL</span><span className="bps-number">DIFFERENCE</span><span>STATUS</span><span>IMBALANCE REMARK</span>
-          </div>
-          {history.map((entry, index) => {
-            const historicalDate = String(entry.business_date || "").slice(0, 10);
-            const selected = historicalDate === date;
-            const diff = Number(entry.difference || 0);
-            return (
-              <button type="button" className={`bps-table-row bps-history-grid bps-history-row ${selected ? "selected" : ""}`} key={`${historicalDate}-${index}`} onClick={() => historicalDate && setDate(historicalDate)}>
-                <span>{historicalDate || "—"}</span>
-                <span className="bps-number">{money(entry.actual_capital)}</span>
-                <span className={`bps-number ${diff < 0 ? "negative" : diff > 0 ? "positive" : ""}`}>
-                  {diff === 0 ? money(0) : `${diff < 0 ? "−" : "+"}${money(Math.abs(diff))}`}
-                </span>
-                <span className={`bps-status ${String(entry.status || "").toLowerCase()}`}>{entry.status || "—"}</span>
-                <span>{entry.reason || "—"}</span>
-              </button>
-            );
-          })}
-          {!history.length && <div className="bps-empty-row">No historical branch status records yet.</div>}
+      {emailOpen && (
+        <div className="gss-email-overlay" role="dialog" aria-modal="true" aria-labelledby="gss-email-title">
+          <form className="gss-email-dialog" onSubmit={sendReportEmail}>
+            <div className="gss-email-header">
+              <div>
+                <h2 id="gss-email-title">Email General Shop Status</h2>
+                <p>{data?.branch?.name || user?.branch_name || "Branch"} • {date}</p>
+              </div>
+              <button type="button" className="gss-email-close" onClick={() => setEmailOpen(false)} aria-label="Close">×</button>
+            </div>
+            <div className="gss-email-field">
+              <label htmlFor="gss-email-to">To</label>
+              <div className="gss-email-help">Separate multiple addresses with commas</div>
+              <input id="gss-email-to" value={emailForm.to} onChange={(e) => setEmailForm((v) => ({ ...v, to: e.target.value }))} placeholder="recipient@example.com" autoFocus />
+            </div>
+            <div className="gss-email-field">
+              <label htmlFor="gss-email-cc">CC <span>Optional</span></label>
+              <input id="gss-email-cc" value={emailForm.cc} onChange={(e) => setEmailForm((v) => ({ ...v, cc: e.target.value }))} placeholder="cc@example.com" />
+            </div>
+            <div className="gss-email-field">
+              <label htmlFor="gss-email-subject">Subject</label>
+              <input id="gss-email-subject" value={emailForm.subject} onChange={(e) => setEmailForm((v) => ({ ...v, subject: e.target.value }))} maxLength={180} />
+            </div>
+            <div className="gss-email-field">
+              <label htmlFor="gss-email-message">Message <span>Optional</span></label>
+              <textarea id="gss-email-message" value={emailForm.message} onChange={(e) => setEmailForm((v) => ({ ...v, message: e.target.value }))} maxLength={5000} />
+            </div>
+            {emailError && <div className="gss-email-error">{emailError}</div>}
+            <div className="gss-email-actions">
+              <button type="button" className="gss-email-cancel" onClick={() => setEmailOpen(false)} disabled={emailSending}>Cancel</button>
+              <button type="submit" className="gss-email-send" disabled={emailSending}>{emailSending ? "Sending…" : "Send Report"}</button>
+            </div>
+          </form>
         </div>
-      </section>
+      )}
 
       <footer className="bps-footer">
         <span>AIRTEL COMMUNICATIONS</span>
