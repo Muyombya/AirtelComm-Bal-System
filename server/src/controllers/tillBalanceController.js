@@ -227,13 +227,27 @@ export async function createTillBalance(req, res, next) {
     const difference = actualTillCapital - operatingCapital;
     const status = difference < 0 ? "SHORT" : difference > 0 ? "EXCESS" : "BALANCED";
 
-    // Every Record Balance remains a permanent history event. The Shortage
-    // Counter, however, must only recognise a NEW shortage compared with the
-    // immediately preceding recorded session for this Till. This prevents the
-    // same shortage from being counted again when the user records the same
-    // physical position on another balancing session.
+    // Every Record Balance is a permanent history event. A SHORT balance is
+    // also a complete, independent shortage event. It must never be reduced
+    // by the previous Till Balance difference because a previous shortage may
+    // already have been partially or fully recovered through an explicit
+    // settlement allocation. Settlement is event-specific and is the only
+    // mechanism that reduces an event's outstanding amount.
+    //
+    // Example:
+    //   Event #1: shortage 600,000; settlement 500,000 => outstanding 100,000
+    //   Event #2: shortage 1,000,000                     => outstanding 1,000,000
+    //   Total outstanding                                 = 1,100,000
+    //
+    // Therefore shortage_event_amount must equal the full shortage observed
+    // by this balancing session, not current shortage minus previous shortage.
+    const currentShortage = difference < 0 ? Math.abs(difference) : 0;
+    const shortageEventAmount = Number(currentShortage.toFixed(2));
+
+    // Keep excess handling unchanged for now. Excess does not participate in
+    // the shortage/recovery event ledger.
     const previousBalanceResult = await client.query(
-      `SELECT id, difference, business_date
+      `SELECT difference
        FROM till_balances
        WHERE till_id = $1
        ORDER BY balanced_at DESC, id DESC
@@ -243,13 +257,6 @@ export async function createTillBalance(req, res, next) {
     const previousDifference = previousBalanceResult.rowCount
       ? Number(previousBalanceResult.rows[0].difference || 0)
       : null;
-
-    const previousShortage = previousDifference !== null && previousDifference < 0
-      ? Math.abs(previousDifference)
-      : 0;
-    const currentShortage = difference < 0 ? Math.abs(difference) : 0;
-    const shortageEventAmount = Number(Math.max(currentShortage - previousShortage, 0).toFixed(2));
-
     const previousExcess = previousDifference !== null && previousDifference > 0
       ? previousDifference
       : 0;
@@ -318,7 +325,9 @@ export async function createTillBalance(req, res, next) {
       shortageEvent: {
         newShortage: shortageEventAmount,
         observedShortage: currentShortage,
-        previousShortage,
+        // Independent shortage events no longer derive from a previous shortage.
+        // Keep the response field for compatibility without reintroducing the old subtraction model.
+        previousShortage: null,
       },
       excessEvent: {
         newExcess: excessEventAmount,
