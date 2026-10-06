@@ -313,22 +313,6 @@ export default function GeneralShopStatus({ user }) {
         </div>
       </section>
 
-      <section className="bps-section">
-        <div className="bps-section-title">ADJUSTED POSITION</div>
-        <div className="bps-statement">
-          <div className="bps-line">
-            <span>Capital Including Shortage Position</span>
-            <span className="bps-number">{money(adjustedBranchCapital)}</span>
-          </div>
-          <div className="bps-line bps-emphasis">
-            <span>Adjusted Imbalance</span>
-            <span className={`bps-number ${adjustedDifference < 0 ? "negative" : adjustedDifference > 0 ? "positive" : ""}`}>
-              {money(adjustedDifference)}
-            </span>
-          </div>
-        </div>
-      </section>
-
       <section className="bps-section bps-remark-section">
         <div className="bps-section-title">IMBALANCE REMARK</div>
         <div className="bps-remark-block">

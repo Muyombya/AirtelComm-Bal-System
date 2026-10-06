@@ -330,6 +330,13 @@ export default function TillBalancing({ user }) {
       });
       setMessage(`Balance recorded successfully — ${result.status}.`);
       setRecordedBalanceStatus(result.status);
+
+      // Immediately refresh the Till Shortage Counter after recording a balance.
+      const refreshedShortagePosition = await getTillShortagePosition(
+        Number(tillId),
+        businessDate
+      );
+      setShortagePosition(refreshedShortagePosition);
       // Reset every user-entered balancing field to zero after a successful record.
       // Keep the saved database values intact; only the current entry form is reset.
       const zeroCash = Object.fromEntries(
@@ -903,7 +910,7 @@ export default function TillBalancing({ user }) {
             </div>
           </section>
         </div>
-      </div>}}
+      </div>}
     </main>
   );
 }
