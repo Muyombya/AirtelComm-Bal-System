@@ -123,7 +123,7 @@ async function getShortageSummary(client, branchId, date) {
        SELECT employee_id,
               STRING_AGG(DISTINCT till_name, ', ' ORDER BY till_name) AS till_names,
               COALESCE(SUM(shortage),0)::NUMERIC(18,2) AS total_incurred,
-              COALESCE(SUM(shortage) FILTER (WHERE business_date = $2),0)::NUMERIC(18,2) AS new_shortage,
+              COALESCE(SUM(GREATEST(shortage - recovered, 0)) FILTER (WHERE business_date = $2),0)::NUMERIC(18,2) AS new_shortage,
               COALESCE(SUM(recovered),0)::NUMERIC(18,2) AS recovered_to_date
        FROM shortage_events
        GROUP BY employee_id
@@ -304,6 +304,34 @@ export async function getGeneralShopStatus(req, res, next) {
 
     const latestByTill = Object.fromEntries(balances.rows.map(r => [r.till_id,r]));
 
+    // A shortage settlement is an event against a specific Till Balance.
+    // GSS must use that same event-level recovery when presenting the
+    // corresponding Till Performance row; employee-level recovery from the
+    // shortage counter is not sufficient because an employee can have more
+    // than one shortage event across multiple balancing sessions.
+    const latestBalanceIds = balances.rows.map(r => Number(r.id)).filter(Number.isInteger);
+    const latestEventRecoveryResult = latestBalanceIds.length
+      ? await pool.query(
+          `SELECT p.till_balance_id,
+                  p.shortage,
+                  COALESCE(SUM(a.amount) FILTER (WHERE bsp.payment_date <= $2),0)::NUMERIC(18,2) AS recovered
+           FROM till_shortage_event_positions p
+           LEFT JOIN till_shortage_settlement_allocations a
+             ON a.till_balance_id=p.till_balance_id
+           LEFT JOIN branch_shortage_payments bsp
+             ON bsp.id=a.payment_id
+           WHERE p.till_balance_id = ANY($1::BIGINT[])
+           GROUP BY p.till_balance_id,p.shortage`,
+          [latestBalanceIds, date]
+        )
+      : { rows: [] };
+    const latestEventRecoveryByBalance = Object.fromEntries(
+      latestEventRecoveryResult.rows.map(r => [String(r.till_balance_id), {
+        shortage: Number(r.shortage || 0),
+        recovered: Number(r.recovered || 0),
+      }])
+    );
+
     // Branch Operating Capital is the authoritative branch benchmark from Master Data.
     // Till Operating Capital is only the allocation beneath the branch and must not
     // replace the branch-level capital benchmark in General Shop Status.
@@ -390,10 +418,15 @@ export async function getGeneralShopStatus(req, res, next) {
       tills: tills.rows.map(t=>{
         const b=latestByTill[t.id]||null;
         const shortagePosition=b ? (tillShortagePosition[b.employee_id] || { outstanding: 0, recovered: 0 }) : { outstanding: 0, recovered: 0 };
-        const shortageCapital=shortagePosition.outstanding + shortagePosition.recovered;
+        const eventRecovery=b ? (latestEventRecoveryByBalance[String(b.id)] || { shortage: 0, recovered: 0 }) : { shortage: 0, recovered: 0 };
+        const eventOutstanding=Math.max(eventRecovery.shortage-eventRecovery.recovered,0);
+        const eventRecovered=Math.min(eventRecovery.recovered,eventRecovery.shortage);
+        const adjustedDifference=b ? Number(b.difference)+eventRecovered : null;
+        const performanceStatus=!b ? "NOT BALANCED" : adjustedDifference < 0 ? "SHORT" : adjustedDifference > 0 ? "EXCESS" : "BALANCED";
         return { till:t, balance:b, shortageBalance:shortagePosition.outstanding, shortageRecovered:shortagePosition.recovered,
-          adjustedActualCapital:b ? Number(b.actual_till_capital)+shortageCapital : null,
-          adjustedDifference:b ? Number(b.difference)+shortageCapital : null };
+          eventShortage:eventRecovery.shortage, eventRecovered, eventOutstanding,
+          adjustedActualCapital:b ? Number(b.actual_till_capital)+eventRecovered : null,
+          adjustedDifference, performanceStatus };
       }),
       positions: positions.rows.map(r=>({terminal_name:r.terminal_name,amount:Number(r.amount)})),
       dailyTransactions: tx.rows.map(r=>({ terminal_id:r.terminal_id, terminal_name:r.terminal_name, transactionCount:Number(r.transaction_count||0) })),
@@ -502,13 +535,21 @@ export async function recordShortagePayment(req, res, next) {
   finally { client.release(); }
 }
 
-
-// Reuse the authoritative GSS calculation for server-generated email reports.
-// This wrapper deliberately calls the same controller logic rather than maintaining a second report calculation.
+// Server-side helper used by the existing General Shop Status email report controller.
+// It reuses the same authoritative GSS calculation as the HTTP endpoint.
 export async function loadGeneralShopStatus(branchId, businessDate) {
   return new Promise((resolve, reject) => {
-    const req = { query: { branchId: String(branchId), businessDate: String(businessDate) } };
-    const res = { json: (payload) => resolve(payload) };
+    const req = {
+      query: {
+        branchId: String(branchId),
+        businessDate: String(businessDate),
+      },
+    };
+
+    const res = {
+      json: (payload) => resolve(payload),
+    };
+
     getGeneralShopStatus(req, res, reject);
   });
 }

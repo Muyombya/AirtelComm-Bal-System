@@ -318,8 +318,12 @@ export default function TillBalancing({ user }) {
         amount: inputNumber(floats[terminal.terminal_id]),
       }));
 
+      const selectedTill = tills.find((item) => String(item.id) === String(tillId));
+      const branchId = selectedTill?.branch_id ?? user?.branch_id ?? null;
+
       const result = await createTillBalance({
         tillId: Number(tillId),
+        branchId: branchId == null ? null : Number(branchId),
         businessDate,
         cashItems,
         floatBalances,
@@ -332,11 +336,14 @@ export default function TillBalancing({ user }) {
       setRecordedBalanceStatus(result.status);
 
       // Immediately refresh the Till Shortage Counter after recording a balance.
+      // This preserves the established Till Balancing behaviour while the
+      // branch-report event refreshes General Shop Status separately.
       const refreshedShortagePosition = await getTillShortagePosition(
         Number(tillId),
         businessDate
       );
       setShortagePosition(refreshedShortagePosition);
+
       // Reset every user-entered balancing field to zero after a successful record.
       // Keep the saved database values intact; only the current entry form is reset.
       const zeroCash = Object.fromEntries(
@@ -416,7 +423,8 @@ export default function TillBalancing({ user }) {
         settlementEvent.tillBalanceId,
         amount,
         paymentDate,
-        settlementNote
+        settlementNote,
+        tills.find((item) => String(item.id) === String(tillId))?.branch_id ?? user?.branch_id ?? null
       );
       setMessage(result.message || "Shortage settlement recorded successfully.");
       setSettlementOpen(false);
@@ -426,6 +434,22 @@ export default function TillBalancing({ user }) {
       setSettlementNote("");
       const refreshed = await getTillShortagePosition(tillId, businessDate);
       setShortagePosition(refreshed);
+
+      // The API also emits the shared branch-report event. Keep this local
+      // refresh notification for compatibility with the existing shortage
+      // channel, but include the authoritative branch id from the refreshed
+      // shortage position.
+      try {
+        const channel = new BroadcastChannel("airtelcomm-shortage-updates");
+        channel.postMessage({
+          type: "SHORTAGE_SETTLEMENT_RECORDED",
+          branchId: refreshed?.branchId ?? user?.branch_id ?? null,
+          businessDate: paymentDate,
+        });
+        channel.close();
+      } catch {
+        // BroadcastChannel is optional; the shared branch-report event remains available.
+      }
     } catch (err) {
       setError(err.message);
     } finally {

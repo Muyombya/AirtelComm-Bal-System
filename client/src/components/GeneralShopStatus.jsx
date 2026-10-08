@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { getBranches, getGeneralShopStatus, sendGeneralShopStatusEmail, getGeneralShopStatusPdf } from "../services/api";
+import { subscribeToBranchReportChanges } from "../services/branchReportEvents";
 import "../branch-performance-status.css";
 import "../general-shop-status-email.css";
 
@@ -71,6 +72,36 @@ export default function GeneralShopStatus({ user }) {
   useEffect(() => {
     if (branchId) load();
   }, [date, branchId]);
+
+  useEffect(() => {
+    if (!branchId || isHistorical) return undefined;
+
+    const unsubscribe = subscribeToBranchReportChanges((update) => {
+      if (update?.branchId == null) return;
+      if (String(update.branchId) !== String(branchId)) return;
+      if (update?.businessDate && String(update.businessDate).slice(0, 10) !== String(date)) return;
+      load();
+    });
+
+    let channel;
+    try {
+      channel = new BroadcastChannel("airtelcomm-shortage-updates");
+      channel.onmessage = (event) => {
+        const update = event?.data;
+        if (update?.type !== "SHORTAGE_SETTLEMENT_RECORDED") return;
+        if (String(update.branchId) !== String(branchId)) return;
+        if (String(update.businessDate).slice(0, 10) !== String(date)) return;
+        load();
+      };
+    } catch {
+      channel = null;
+    }
+
+    return () => {
+      unsubscribe();
+      if (channel) channel.close();
+    };
+  }, [branchId, date, isHistorical]);
 
   const status = String(data?.totals?.status || "BALANCED").toUpperCase();
   const positions = Array.isArray(data?.positions) ? data.positions : [];
@@ -333,8 +364,8 @@ export default function GeneralShopStatus({ user }) {
           </div>
           {tills.map((item, index) => {
             const balance = item.balance;
-            const diff = Number(balance?.difference || 0);
-            const tillStatus = balance?.status || "NOT BALANCED";
+            const diff = Number(item?.adjustedDifference ?? balance?.difference ?? 0);
+            const tillStatus = item?.performanceStatus || balance?.status || "NOT BALANCED";
             return (
               <div className="bps-table-row bps-till-grid" key={item.till?.id || index}>
                 <span>{item.till?.name || "—"}</span>
@@ -467,16 +498,16 @@ export default function GeneralShopStatus({ user }) {
       <section className="bps-section">
         <div className="bps-section-title">MANAGEMENT ATTENTION</div>
         <div className="bps-attention">
-          {tills.filter((item) => String(item.balance?.status || "").toUpperCase() === "SHORT").map((item) => (
+          {tills.filter((item) => String(item.performanceStatus || item.balance?.status || "").toUpperCase() === "SHORT").map((item) => (
             <div key={`short-${item.till?.id}`}>• {item.till?.name || "Till"} — shortage requires attention.</div>
           ))}
-          {tills.filter((item) => String(item.balance?.status || "").toUpperCase() === "EXCESS").map((item) => (
+          {tills.filter((item) => String(item.performanceStatus || item.balance?.status || "").toUpperCase() === "EXCESS").map((item) => (
             <div key={`excess-${item.till?.id}`}>• {item.till?.name || "Till"} — excess recorded.</div>
           ))}
           {shortages.filter((item) => Number(item.balance || 0) > 0).map((item) => (
             <div key={`debt-${item.employeeId}`}>• {item.name} — outstanding shortage of {money(item.balance)}.</div>
           ))}
-          {!tills.some((item) => ["SHORT", "EXCESS"].includes(String(item.balance?.status || "").toUpperCase()))
+          {!tills.some((item) => ["SHORT", "EXCESS"].includes(String(item.performanceStatus || item.balance?.status || "").toUpperCase()))
             && !shortages.some((item) => Number(item.balance || 0) > 0)
             && <div>• No outstanding balancing exceptions for the selected date.</div>}
         </div>

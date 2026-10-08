@@ -241,17 +241,16 @@ export function createGeneralShopStatusPdf(report) {
   addKeyValue(doc, "Actual Branch Capital", money(Number(report.totals?.totalFloat || 0) + Number(report.totals?.totalCash || 0)));
   addKeyValue(doc, "Imbalance", money(report.totals?.difference), { valueColor: Number(report.totals?.difference || 0) < 0 ? COLORS.red : COLORS.green });
 
-  addSectionTitle(doc, "Adjusted Position");
-  addKeyValue(doc, "Capital Including Shortage Position", money(report.totals?.adjustedBranchCapital));
-  addKeyValue(doc, "Adjusted Imbalance", money(report.totals?.adjustedDifference), { valueColor: Number(report.totals?.adjustedDifference || 0) < 0 ? COLORS.red : COLORS.green });
-
   addSectionTitle(doc, "Imbalance Remark");
   addWrappedText(doc, report.imbalanceRemark || report.reason || "No imbalance remark has been recorded.");
 
   addSectionTitle(doc, "Till Performance");
   const tillRows = (report.tills || []).map((item) => {
     const b = item.balance || {};
-    return [item.till?.name, b.attendant_name, money(b.operating_capital), money(b.actual_till_capital), money(b.difference), b.status || "NOT BALANCED"];
+    const difference = Number(item.adjustedDifference ?? b.difference ?? 0);
+    const tillStatus = item.performanceStatus || b.status || "NOT BALANCED";
+    const actualCapital = item.adjustedActualCapital ?? b.actual_till_capital;
+    return [item.till?.name, b.attendant_name, money(b.operating_capital), money(actualCapital), money(difference), tillStatus];
   });
   addTable(doc, ["Till", "Attendant", "Operating", "Actual", "Difference", "Status"], tillRows, [82, 90, 82, 82, 82, 77], {
     alignments: ["left", "left", "right", "right", "right", "left"], statusIndex: 5, striped: true,
@@ -289,7 +288,7 @@ export function createGeneralShopStatusPdf(report) {
   addSectionTitle(doc, "Management Attention");
   const attention = [];
   (report.tills || []).forEach((item) => {
-    const tillStatus = String(item.balance?.status || "").toUpperCase();
+    const tillStatus = String(item.performanceStatus || item.balance?.status || "").toUpperCase();
     if (tillStatus === "SHORT") attention.push(`${item.till?.name || "Till"} — shortage requires attention.`);
     if (tillStatus === "EXCESS") attention.push(`${item.till?.name || "Till"} — excess recorded.`);
   });
@@ -304,10 +303,9 @@ export function createGeneralShopStatusPdf(report) {
     addPageFooter(doc, i + 1, pageRange.count);
   }
 
-  doc.end();
-
   return new Promise((resolve, reject) => {
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
+    doc.end();
   });
 }
