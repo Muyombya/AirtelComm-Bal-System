@@ -15,3 +15,6 @@
 .business-capital-count strong{font-size:30px;margin-top:12px}
 .business-capital-badge{position:relative;z-index:1;flex:0 0 auto;padding:5px 9px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:10px;line-height:1;font-weight:800;letter-spacing:.04em}
 @media(max-width:760px){.business-capital-summary{grid-template-columns:1fr;gap:10px;margin:14px 0 16px}.business-capital-card{min-height:96px;padding:15px 16px}.business-capital-card strong,.business-capital-count strong{font-size:24px}}
+.capital-allocation-note{grid-column:1/-1;margin:-2px 0 4px;padding:9px 11px;border-radius:7px;background:#eef4fa;color:#334e68;font-size:12px;font-weight:600}
+.capital-allocation-note.error{background:#fff0ed;color:#a43121}
+.capital-overallocated{color:#a43121;font-weight:800}

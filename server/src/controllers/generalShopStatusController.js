@@ -102,16 +102,10 @@ async function getShortageSummary(client, branchId, date) {
               p.employee_name,
               p.till_name,
               p.business_date,
-              p.shortage,
-              COALESCE(SUM(a.amount) FILTER (WHERE bsp.payment_date <= $2),0)::NUMERIC(18,2) AS recovered
+              p.shortage
        FROM till_shortage_event_positions p
-       LEFT JOIN till_shortage_settlement_allocations a
-         ON a.till_balance_id=p.till_balance_id
-       LEFT JOIN branch_shortage_payments bsp
-         ON bsp.id=a.payment_id
        WHERE p.branch_id=$1
          AND p.business_date <= $2
-       GROUP BY p.till_balance_id,p.employee_id,p.employee_name,p.till_name,p.business_date,p.shortage
      ),
      people AS (
        SELECT employee_id FROM shortage_events
@@ -123,8 +117,8 @@ async function getShortageSummary(client, branchId, date) {
        SELECT employee_id,
               STRING_AGG(DISTINCT till_name, ', ' ORDER BY till_name) AS till_names,
               COALESCE(SUM(shortage),0)::NUMERIC(18,2) AS total_incurred,
-              COALESCE(SUM(GREATEST(shortage - recovered, 0)) FILTER (WHERE business_date = $2),0)::NUMERIC(18,2) AS new_shortage,
-              COALESCE(SUM(recovered),0)::NUMERIC(18,2) AS recovered_to_date
+              COALESCE(SUM(shortage) FILTER (WHERE business_date < $2),0)::NUMERIC(18,2) AS prior_shortage,
+              COALESCE(SUM(shortage) FILTER (WHERE business_date = $2),0)::NUMERIC(18,2) AS new_shortage
        FROM shortage_events
        GROUP BY employee_id
      ),
@@ -141,16 +135,17 @@ async function getShortageSummary(client, branchId, date) {
             e.name AS employee_name,
             COALESCE(st.till_names,'') AS till_names,
             COALESCE(st.total_incurred,0)::NUMERIC(18,2) AS total_incurred,
+            GREATEST(COALESCE(st.prior_shortage,0)-COALESCE(pt.payments_before,0),0)::NUMERIC(18,2) AS amount_owed,
             COALESCE(st.new_shortage,0)::NUMERIC(18,2) AS new_shortage,
-            COALESCE(st.recovered_to_date,0)::NUMERIC(18,2) AS recovered_to_date,
+            COALESCE(pt.payments_to_date,0)::NUMERIC(18,2) AS recovered_to_date,
             COALESCE(pt.payments_before,0)::NUMERIC(18,2) AS payments_before,
             COALESCE(pt.payments_today,0)::NUMERIC(18,2) AS payments_today,
-            GREATEST(COALESCE(st.total_incurred,0)-COALESCE(st.recovered_to_date,0),0)::NUMERIC(18,2) AS balance
+            GREATEST(COALESCE(st.prior_shortage,0)-COALESCE(pt.payments_before,0)+COALESCE(st.new_shortage,0)-COALESCE(pt.payments_today,0),0)::NUMERIC(18,2) AS balance
      FROM people p
      JOIN employees e ON e.id=p.employee_id
      LEFT JOIN shortage_totals st ON st.employee_id=p.employee_id
      LEFT JOIN payments pt ON pt.employee_id=p.employee_id
-     WHERE GREATEST(COALESCE(st.total_incurred,0)-COALESCE(st.recovered_to_date,0),0) > 0
+     WHERE GREATEST(COALESCE(st.prior_shortage,0)-COALESCE(pt.payments_before,0)+COALESCE(st.new_shortage,0)-COALESCE(pt.payments_today,0),0) > 0
         OR COALESCE(st.new_shortage,0) > 0
         OR COALESCE(pt.payments_today,0) > 0
      ORDER BY e.name`,
@@ -162,6 +157,7 @@ async function getShortageSummary(client, branchId, date) {
     name: r.employee_name,
     tillName: r.till_names || "—",
     totalIncurred: Number(r.total_incurred || 0),
+    amountOwed: Number(r.amount_owed || 0),
     newShortage: Number(r.new_shortage || 0),
     recoveredToDate: Number(r.recovered_to_date || 0),
     paymentsBefore: Number(r.payments_before || 0),
@@ -194,26 +190,36 @@ export async function getGeneralShopStatus(req, res, next) {
     );
 
     const positions = await pool.query(
-      `SELECT x.terminal_name, SUM(x.amount)::NUMERIC(18,2) AS amount
+      `SELECT x.terminal_name,
+              x.service_provider_id,
+              x.service_provider_name,
+              SUM(x.amount)::NUMERIC(18,2) AS amount
        FROM (
          SELECT DISTINCT ON (fb.terminal_id,tb.till_id)
-           fb.terminal_id,tb.till_id,t.name AS terminal_name,fb.amount,tb.balanced_at,tb.id
+           fb.terminal_id,tb.till_id,t.name AS terminal_name,
+           sp.id AS service_provider_id,sp.name AS service_provider_name,
+           fb.amount,tb.balanced_at,tb.id
          FROM float_balances fb
          JOIN till_balances tb ON tb.id=fb.till_balance_id
          JOIN tills ti ON ti.id=tb.till_id JOIN terminals t ON t.id=fb.terminal_id
+         JOIN service_providers sp ON sp.id=fb.service_provider_id
          WHERE ti.branch_id=$1 AND tb.business_date=$2
          ORDER BY fb.terminal_id,tb.till_id,tb.balanced_at DESC,tb.id DESC
-       ) x GROUP BY x.terminal_name ORDER BY x.terminal_name`, [branchId,date]
+       ) x
+       GROUP BY x.terminal_name,x.service_provider_id,x.service_provider_name
+       ORDER BY x.terminal_name`, [branchId,date]
     );
 
     const tx = await pool.query(
       `SELECT ttc.terminal_id, MAX(term.name) AS terminal_name,
+              sp.id AS service_provider_id,sp.name AS service_provider_name,
               SUM(ttc.transaction_count)::INT AS transaction_count
        FROM till_transaction_counts ttc
        JOIN tills t ON t.id=ttc.till_id
        JOIN terminals term ON term.id=ttc.terminal_id
+       JOIN service_providers sp ON sp.id=term.service_provider_id
        WHERE t.branch_id=$1 AND ttc.business_date=$2 AND ttc.terminal_id IS NOT NULL
-       GROUP BY ttc.terminal_id
+       GROUP BY ttc.terminal_id,sp.id,sp.name
        ORDER BY terminal_name`, [branchId,date]
     );
 
@@ -428,8 +434,8 @@ export async function getGeneralShopStatus(req, res, next) {
           adjustedActualCapital:b ? Number(b.actual_till_capital)+eventRecovered : null,
           adjustedDifference, performanceStatus };
       }),
-      positions: positions.rows.map(r=>({terminal_name:r.terminal_name,amount:Number(r.amount)})),
-      dailyTransactions: tx.rows.map(r=>({ terminal_id:r.terminal_id, terminal_name:r.terminal_name, transactionCount:Number(r.transaction_count||0) })),
+      positions: positions.rows.map(r=>({terminal_name:r.terminal_name,service_provider_id:Number(r.service_provider_id),service_provider_name:r.service_provider_name,amount:Number(r.amount)})),
+      dailyTransactions: tx.rows.map(r=>({ terminal_id:r.terminal_id, terminal_name:r.terminal_name, service_provider_id:Number(r.service_provider_id),service_provider_name:r.service_provider_name,transactionCount:Number(r.transaction_count||0) })),
       accessoriesCount: Number(entry.rows[0]?.accessories_count||0),
       imbalanceRemark: entry.rows[0]?.reason || "",
       reason: entry.rows[0]?.reason || "",
@@ -480,7 +486,6 @@ export async function saveGeneralShopStatus(req,res,next) {
     const tillCount=await pool.query(`SELECT COUNT(*)::INT AS n FROM tills WHERE branch_id=$1 AND status='ACTIVE'`,[branchId]);
     const balancedCount=await pool.query(`SELECT COUNT(DISTINCT tb.till_id)::INT AS n FROM till_balances tb JOIN tills t ON t.id=tb.till_id WHERE t.branch_id=$1 AND tb.business_date=$2`,[branchId,date]);
     const status=Number(balancedCount.rows[0].n)<Number(tillCount.rows[0].n)?"INCOMPLETE":actual-operating<0?"SHORT":actual-operating>0?"EXCESS":"BALANCED";
-    if ((status==="SHORT" || status==="EXCESS") && !reason) { const e=new Error("A brief reason is required when the branch is SHORT or EXCESS."); e.statusCode=400; throw e; }
     await pool.query(`INSERT INTO general_shop_status_entries(branch_id,business_date,accessories_count,reason,updated_at)
       VALUES($1,$2,$3,$4,NOW()) ON CONFLICT(branch_id,business_date)
       DO UPDATE SET accessories_count=EXCLUDED.accessories_count,reason=EXCLUDED.reason,updated_at=NOW()`, [branchId,date,accessoriesCount,reason||null]);

@@ -101,10 +101,6 @@ export default function SupervisorDailyInputs({ user }) {
 
     const value = Number(String(accessories || "").replace(/,/g, "") || 0);
     if (!Number.isInteger(value) || value < 0) return setError("Accessories Sales must be a valid non-negative whole amount.");
-    if ((status === "SHORT" || status === "EXCESS") && !remark.trim()) {
-      return setError("A brief Imbalance Remark is required when the branch is SHORT or EXCESS.");
-    }
-
     setSaving(true);
     try {
       await saveSupervisorDailyInputs(Number(branchId), date, value, remark.trim());
@@ -161,7 +157,7 @@ export default function SupervisorDailyInputs({ user }) {
         <div className="sdi-divider" />
 
         <label className="sdi-field">
-          <span>ACCESSORIES SALES <small>UGX</small></span>
+          <span>ACCESSORIES SALES <small>UGX · OPTIONAL</small></span>
           <input
             inputMode="numeric"
             value={accessories}
@@ -173,7 +169,7 @@ export default function SupervisorDailyInputs({ user }) {
         </label>
 
         <label className="sdi-field">
-          <span>IMBALANCE REMARK</span>
+          <span>IMBALANCE REMARK <small>OPTIONAL</small></span>
           <textarea
             rows="5"
             value={remark}

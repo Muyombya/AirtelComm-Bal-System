@@ -1,6 +1,21 @@
 import { pool } from "../config/database.js";
 
 const toNumber = (v) => Number(v || 0);
+const capitalAmount = (value) => {
+  const amount = Number(String(value ?? 0).replace(/,/g, ""));
+  if (!Number.isFinite(amount) || amount < 0) {
+    const error = new Error("Operating capital must be a non-negative number.");
+    error.statusCode = 400;
+    throw error;
+  }
+  return amount;
+};
+const capitalLimitError = (branchName, allocated, branchCapital) => {
+  const excess = (allocated - branchCapital).toLocaleString("en-UG");
+  const error = new Error(`Till operating capital would exceed ${branchName}'s branch capital by UGX ${excess}. Increase the branch capital or reduce the Till allocation.`);
+  error.statusCode = 400;
+  return error;
+};
 
 export async function createBranch(req, res, next) {
   try {
@@ -16,18 +31,33 @@ export async function createBranch(req, res, next) {
 }
 
 export async function updateBranch(req, res, next) {
+  const client = await pool.connect();
   try {
     const { id } = req.params;
     const { name, contact = null, email = null, location = null, operatingCapital = 0 } = req.body || {};
     if (!String(name || "").trim()) return res.status(400).json({ error: "Branch name is required." });
-    const result = await pool.query(
+    const branchCapital = capitalAmount(operatingCapital);
+    await client.query("BEGIN");
+    const current = await client.query("SELECT id FROM branches WHERE id=$1 FOR UPDATE", [Number(id)]);
+    if (!current.rowCount) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Branch not found." });
+    }
+    const allocation = await client.query(
+      "SELECT COALESCE(SUM(operating_capital),0) AS allocated FROM tills WHERE branch_id=$1",
+      [Number(id)]
+    );
+    const allocated = Number(allocation.rows[0].allocated || 0);
+    if (branchCapital < allocated) throw capitalLimitError(String(name).trim(), allocated, branchCapital);
+    const result = await client.query(
       `UPDATE branches SET name=$1, contact=$2, email=$3, location=$4, operating_capital=$5, updated_at=NOW()
        WHERE id=$6 RETURNING id,name,contact,email,location,operating_capital`,
-      [String(name).trim(), contact || null, email || null, location || null, toNumber(operatingCapital), Number(id)]
+      [String(name).trim(), contact || null, email || null, location || null, branchCapital, Number(id)]
     );
-    if (!result.rowCount) return res.status(404).json({ error: "Branch not found." });
+    await client.query("COMMIT");
     res.json({ ...result.rows[0], id: Number(result.rows[0].id), operating_capital: toNumber(result.rows[0].operating_capital) });
-  } catch (e) { next(e); }
+  } catch (e) { await client.query("ROLLBACK").catch(() => {}); next(e); }
+  finally { client.release(); }
 }
 
 export async function listMasterTills(req, res, next) {
@@ -50,24 +80,49 @@ export async function listMasterTills(req, res, next) {
 }
 
 export async function createTill(req,res,next){
+  const client = await pool.connect();
   try{
     const { branchId,name,operatingCapital=0,status="ACTIVE" }=req.body||{};
     if(!branchId || !String(name||"").trim()) return res.status(400).json({error:"Branch and Till name are required."});
-    const branch=await pool.query("SELECT id FROM branches WHERE id=$1",[Number(branchId)]);
-    if(!branch.rowCount) return res.status(400).json({error:"Selected branch does not exist."});
-    const result=await pool.query(`INSERT INTO tills(branch_id,name,operating_capital,status) VALUES($1,$2,$3,$4) RETURNING id,branch_id,name,operating_capital,status`,[Number(branchId),String(name).trim(),toNumber(operatingCapital),status]);
+    const amount = capitalAmount(operatingCapital);
+    await client.query("BEGIN");
+    const branch=await client.query("SELECT id,name,operating_capital FROM branches WHERE id=$1 FOR UPDATE",[Number(branchId)]);
+    if(!branch.rowCount) { await client.query("ROLLBACK"); return res.status(400).json({error:"Selected branch does not exist."}); }
+    const allocation=await client.query("SELECT COALESCE(SUM(operating_capital),0) AS allocated FROM tills WHERE branch_id=$1",[Number(branchId)]);
+    const allocated=Number(allocation.rows[0].allocated||0)+amount;
+    const branchCapital=Number(branch.rows[0].operating_capital||0);
+    if(allocated>branchCapital) throw capitalLimitError(branch.rows[0].name,allocated,branchCapital);
+    const result=await client.query(`INSERT INTO tills(branch_id,name,operating_capital,status) VALUES($1,$2,$3,$4) RETURNING id,branch_id,name,operating_capital,status`,[Number(branchId),String(name).trim(),amount,status]);
+    await client.query("COMMIT");
     res.status(201).json({...result.rows[0],id:Number(result.rows[0].id),branch_id:Number(result.rows[0].branch_id),operating_capital:toNumber(result.rows[0].operating_capital)});
-  }catch(e){next(e);}
+  }catch(e){await client.query("ROLLBACK").catch(()=>{});next(e);}
+  finally{client.release();}
 }
 
 export async function updateTill(req,res,next){
+  const client=await pool.connect();
   try{
     const {id}=req.params; const {branchId,name,operatingCapital=0,status="ACTIVE"}=req.body||{};
     if(!branchId || !String(name||"").trim()) return res.status(400).json({error:"Branch and Till name are required."});
-    const result=await pool.query(`UPDATE tills SET branch_id=$1,name=$2,operating_capital=$3,status=$4,updated_at=NOW() WHERE id=$5 RETURNING id,branch_id,name,operating_capital,status`,[Number(branchId),String(name).trim(),toNumber(operatingCapital),status,Number(id)]);
-    if(!result.rowCount)return res.status(404).json({error:"Till not found."});
+    const amount=capitalAmount(operatingCapital);
+    await client.query("BEGIN");
+    const current=await client.query("SELECT id,branch_id FROM tills WHERE id=$1 FOR UPDATE",[Number(id)]);
+    if(!current.rowCount){await client.query("ROLLBACK");return res.status(404).json({error:"Till not found."});}
+    const sourceBranchId=Number(current.rows[0].branch_id);
+    const targetBranchId=Number(branchId);
+    const branchIds=[...new Set([sourceBranchId,targetBranchId])].sort((a,b)=>a-b);
+    const branchResult=await client.query("SELECT id,name,operating_capital FROM branches WHERE id=ANY($1::bigint[]) ORDER BY id FOR UPDATE",[branchIds]);
+    const targetBranch=branchResult.rows.find((branch)=>Number(branch.id)===targetBranchId);
+    if(!targetBranch){await client.query("ROLLBACK");return res.status(400).json({error:"Selected branch does not exist."});}
+    const allocation=await client.query("SELECT COALESCE(SUM(operating_capital),0) AS allocated FROM tills WHERE branch_id=$1 AND id<>$2",[targetBranchId,Number(id)]);
+    const allocated=Number(allocation.rows[0].allocated||0)+amount;
+    const branchCapital=Number(targetBranch.operating_capital||0);
+    if(allocated>branchCapital) throw capitalLimitError(targetBranch.name,allocated,branchCapital);
+    const result=await client.query(`UPDATE tills SET branch_id=$1,name=$2,operating_capital=$3,status=$4,updated_at=NOW() WHERE id=$5 RETURNING id,branch_id,name,operating_capital,status`,[targetBranchId,String(name).trim(),amount,status,Number(id)]);
+    await client.query("COMMIT");
     res.json({...result.rows[0],id:Number(result.rows[0].id),branch_id:Number(result.rows[0].branch_id),operating_capital:toNumber(result.rows[0].operating_capital)});
-  }catch(e){next(e);}
+  }catch(e){await client.query("ROLLBACK").catch(()=>{});next(e);}
+  finally{client.release();}
 }
 
 export async function listEmployees(req,res,next){

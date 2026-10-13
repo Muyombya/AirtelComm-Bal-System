@@ -46,12 +46,13 @@ export async function createTillBalance(payload) {
   return result;
 }
 export function getTillShortagePosition(tillId, businessDate) { const p=new URLSearchParams(); if(businessDate)p.set("businessDate",businessDate); const q=p.toString(); return request(`/tills/${tillId}/shortage-position${q?`?${q}`:""}`); }
-export async function recordTillShortageSettlement(tillId, tillBalanceId, amount, paymentDate, note="") {
+export async function recordTillShortageSettlement(tillId, tillBalanceId, amount, paymentDate, note="", branchId=null) {
   const result = await request(`/tills/${tillId}/shortage-settlements`, {
     method:"POST",
     body:JSON.stringify({ tillBalanceId:Number(tillBalanceId), amount:Number(amount), paymentDate, note })
   });
   notifyBranchReportChanged({
+    branchId,
     businessDate: paymentDate,
     reason: "till-shortage-settlement-recorded",
   });
@@ -70,7 +71,6 @@ export async function saveTillTransactionCounts(tillId, businessDate, items) {
 }
 export function getGeneralShopStatus(branchId, businessDate) { const p=new URLSearchParams({branchId:String(branchId),businessDate}); return request(`/general-shop-status?${p.toString()}`); }
 export function saveSupervisorDailyInputs(branchId,businessDate,accessoriesCount,reason) { return request("/general-shop-status",{method:"PUT",body:JSON.stringify({branchId:Number(branchId),businessDate,accessoriesCount:Number(accessoriesCount||0),reason:String(reason||"").trim()})}); }
-export function sendGeneralShopStatusEmail(branchId,businessDate,payload) { return request("/general-shop-status/email-report",{method:"POST",body:JSON.stringify({branchId:Number(branchId),businessDate,...payload})}); }
 export async function getGeneralShopStatusPdf(branchId, businessDate) {
   const params = new URLSearchParams({ branchId: String(branchId), businessDate });
   const response = await fetch(`${API_BASE_URL}/general-shop-status/pdf?${params.toString()}`, {
@@ -91,6 +91,7 @@ export async function getGeneralShopStatusPdf(branchId, businessDate) {
   const match = disposition.match(/filename="?([^";]+)"?/i);
   return { blob, filename: match?.[1] || "General-Shop-Status.pdf" };
 }
+export function sendGeneralShopStatusEmail(branchId,businessDate,payload) { return request("/general-shop-status/email-report",{method:"POST",body:JSON.stringify({branchId:Number(branchId),businessDate,...payload})}); }
 export async function saveGeneralShopStatus(branchId,businessDate,accessoriesCount,reason) {
   const result = await request("/general-shop-status",{method:"PUT",body:JSON.stringify({branchId,businessDate,accessoriesCount,reason})});
   notifyBranchReportChanged({ branchId, businessDate, reason: "branch-status-updated" });
