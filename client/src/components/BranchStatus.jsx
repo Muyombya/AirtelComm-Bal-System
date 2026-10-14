@@ -41,6 +41,61 @@ function printBranchStatus() {
   printWindow.document.close();
 }
 
+function inlineComputedStyles(source, clone) {
+  if (source.nodeType === Node.ELEMENT_NODE && clone.nodeType === Node.ELEMENT_NODE) {
+    const computed = window.getComputedStyle(source);
+    clone.setAttribute("style", [...computed].map((name) => `${name}:${computed.getPropertyValue(name)}`).join(";"));
+  }
+  const sourceChildren = source.childNodes || [];
+  const cloneChildren = clone.childNodes || [];
+  for (let index = 0; index < Math.min(sourceChildren.length, cloneChildren.length); index += 1) {
+    inlineComputedStyles(sourceChildren[index], cloneChildren[index]);
+  }
+}
+
+async function createBranchStatusImage(report) {
+  const width = Math.ceil(report.scrollWidth);
+  const height = Math.ceil(report.scrollHeight);
+  if (!width || !height) throw new Error("The report is not ready to export yet.");
+
+  const clone = report.cloneNode(true);
+  inlineComputedStyles(report, clone);
+  clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
+  clone.style.width = `${width}px`;
+  clone.style.maxWidth = "none";
+  clone.style.height = "auto";
+  clone.style.transform = "none";
+  clone.style.margin = "0";
+
+  const markup = new XMLSerializer().serializeToString(clone);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><foreignObject x="0" y="0" width="${width}" height="${height}">${markup}</foreignObject></svg>`;
+  const svgUrl = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
+  try {
+    const image = new Image();
+    await new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = () => reject(new Error("Could not render the report image in this browser."));
+      image.src = svgUrl;
+    });
+
+    const resolution = 2;
+    const canvas = document.createElement("canvas");
+    canvas.width = width * resolution;
+    canvas.height = height * resolution;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Could not prepare the report image.");
+    context.scale(resolution, resolution);
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, width, height);
+    context.drawImage(image, 0, 0, width, height);
+    return await new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Could not create the PNG file.")), "image/png");
+    });
+  } finally {
+    URL.revokeObjectURL(svgUrl);
+  }
+}
+
 function localBusinessDate() {
   const now = new Date();
   now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
@@ -58,6 +113,8 @@ export default function BranchStatus({ user }) {
   const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [fitMode, setFitMode] = useState(false);
+  const [sharingImage, setSharingImage] = useState(false);
+  const [shareMessage, setShareMessage] = useState("");
   const requestId = useRef(0);
   const reportRef = useRef(null);
 
@@ -206,6 +263,33 @@ export default function BranchStatus({ user }) {
   const status = String(totals.status || "INCOMPLETE").toUpperCase();
   const branchName = data?.branch?.name || user?.branch_name || "Branch";
 
+  const shareBranchStatusImage = async () => {
+    if (!reportRef.current || sharingImage) return;
+    setSharingImage(true);
+    setShareMessage("");
+    try {
+      const blob = await createBranchStatusImage(reportRef.current);
+      const safeBranch = branchName.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "") || "Branch";
+      const file = new File([blob], `Branch-Status-${safeBranch}-${date}.png`, { type: "image/png" });
+      const title = `${branchName} Branch Status · ${date}`;
+      if (navigator.share && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title, text: title });
+      } else {
+        const imageUrl = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = imageUrl;
+        link.download = file.name;
+        link.click();
+        window.setTimeout(() => URL.revokeObjectURL(imageUrl), 1000);
+        setShareMessage("Image downloaded. Open it and share it in WhatsApp.");
+      }
+    } catch (err) {
+      if (err?.name !== "AbortError") setShareMessage(err?.message || "Unable to create the report image.");
+    } finally {
+      setSharingImage(false);
+    }
+  };
+
   return (
     <main className={`app-shell branch-status-page${fitMode ? " fit-mode" : ""}`}>
       <header className="branch-status-controls">
@@ -218,15 +302,21 @@ export default function BranchStatus({ user }) {
           )}
           <label>Date<input type="date" max={today} value={date} onChange={(event) => setDate(event.target.value)} /></label>
           <button type="button" onClick={printBranchStatus} disabled={!data || loading}>Save PDF</button>
+          <button type="button" onClick={shareBranchStatusImage} disabled={!data || loading || sharingImage}>{sharingImage ? "Preparing report…" : "Share report"}</button>
           <button type="button" onClick={() => setFitMode(true)} disabled={!data || loading}>Fit to screen</button>
         </div>
       </header>
+
+      {shareMessage && <div className="branch-status-message" role="status">{shareMessage}</div>}
 
       {error && <div className="branch-status-message error" role="alert">{error}</div>}
       {loading && <div className="branch-status-message">Loading Branch Status…</div>}
       {!loading && !branchId && <div className="branch-status-message">No branch is available.</div>}
 
-      {fitMode && <button type="button" className="branch-status-fit-exit" aria-label="Return to normal Branch Status view" onClick={() => setFitMode(false)}>← Back to report</button>}
+      {fitMode && <>
+        <button type="button" className="branch-status-fit-share" onClick={shareBranchStatusImage} disabled={sharingImage}>{sharingImage ? "Preparing…" : "Share report"}</button>
+        <button type="button" className="branch-status-fit-exit" aria-label="Return to normal Branch Status view" onClick={() => setFitMode(false)}>← Back to report</button>
+      </>}
       {data && !loading && <article ref={reportRef} className="branch-status-report">
         <header className="branch-status-report-head">
           <div><h2>{branchName}</h2><p>Branch Status · {date}</p></div>

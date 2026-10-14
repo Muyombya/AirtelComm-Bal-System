@@ -83,4 +83,6 @@ body.branch-status-fit-active .app-nav{visibility:hidden}
 .branch-status-card h3{display:block}
 .branch-status-expenses-heading{padding:3px 0;border-bottom:1px solid #cbd5df;color:#52677f;text-align:center;text-transform:uppercase;font-size:8px;font-weight:900;letter-spacing:.05em}
 .branch-status-fit-exit{display:block;cursor:pointer;box-shadow:0 2px 8px #102c4a40}
+.branch-status-fit-share{position:fixed;z-index:10001;top:5px;left:6px;min-height:32px;padding:5px 10px;border:0;border-radius:7px;background:#17663a;color:#fff;font-weight:700;cursor:pointer;box-shadow:0 2px 8px #102c4a40}
 @media(max-width:650px){.branch-status-expenses-heading{padding:2px 0;font-size:6px}.branch-status-fit-exit{top:5px;right:5px;min-height:30px;padding:5px 9px;font-size:12px}}
+@media print{.branch-status-fit-share{display:none!important}}
