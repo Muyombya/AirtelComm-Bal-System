@@ -9,9 +9,9 @@ const figureTone = (value, emphasis = "") => Number(value) < 0 ? "negative-figur
 
 function providerGroup(name) {
   const normalized = String(name || "").trim().toLocaleLowerCase();
-  if (["mtn", "airtel", "roving", "africell", "warid"].some((word) => normalized.includes(word))) return "mobile";
-  if (["centenary", "cent ", "absa", "dfcu", "stanbic", "stambic", "equity"].some((word) => normalized.includes(word))) return "banks";
-  return "others";
+  return ["mtn", "airtel", "roving", "africell", "warid"].some((word) => normalized.includes(word))
+    ? "mobile"
+    : "banks";
 }
 
 function printBranchStatus() {
@@ -57,7 +57,44 @@ export default function BranchStatus({ user }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [fitMode, setFitMode] = useState(false);
   const requestId = useRef(0);
+  const reportRef = useRef(null);
+
+  useEffect(() => {
+    if (!fitMode) return undefined;
+    document.body.classList.add("branch-status-fit-active");
+    const fitReport = () => {
+      const report = reportRef.current;
+      if (!report) return;
+      report.style.setProperty("--branch-status-fit-scale", "1");
+      const bounds = report.getBoundingClientRect();
+      const availableWidth = window.innerWidth - 12;
+      const availableHeight = window.innerHeight - 48;
+      const scale = Math.min(1, availableWidth / bounds.width, availableHeight / bounds.height);
+      report.style.setProperty("--branch-status-fit-scale", String(Math.max(0.35, scale)));
+    };
+    const frame = window.requestAnimationFrame(fitReport);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(fitReport);
+    if (reportRef.current && observer) observer.observe(reportRef.current);
+    window.addEventListener("resize", fitReport);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", fitReport);
+      if (observer) observer.disconnect();
+      document.body.classList.remove("branch-status-fit-active");
+      if (reportRef.current) reportRef.current.style.removeProperty("--branch-status-fit-scale");
+    };
+  }, [fitMode, data]);
+
+  useEffect(() => {
+    if (!fitMode) return undefined;
+    const exitOnEscape = (event) => {
+      if (event.key === "Escape") setFitMode(false);
+    };
+    window.addEventListener("keydown", exitOnEscape);
+    return () => window.removeEventListener("keydown", exitOnEscape);
+  }, [fitMode]);
 
   useEffect(() => {
     if (user?.role === "SUPERVISOR") {
@@ -157,7 +194,7 @@ export default function BranchStatus({ user }) {
       current.hasTransactions = true;
       items.set(key, current);
     }
-    const groups = { mobile: [], banks: [], others: [] };
+    const groups = { mobile: [], banks: [] };
     for (const item of items.values()) groups[providerGroup(item.name)].push(item);
     for (const rows of Object.values(groups)) rows.sort((a, b) => a.name.localeCompare(b.name));
     return groups;
@@ -170,7 +207,7 @@ export default function BranchStatus({ user }) {
   const branchName = data?.branch?.name || user?.branch_name || "Branch";
 
   return (
-    <main className="app-shell branch-status-page">
+    <main className={`app-shell branch-status-page${fitMode ? " fit-mode" : ""}`}>
       <header className="branch-status-controls">
         <div><span className="branch-status-kicker">DAILY BRANCH REPORT</span><h1>Branch Status</h1></div>
         <div className="branch-status-filters">
@@ -181,6 +218,7 @@ export default function BranchStatus({ user }) {
           )}
           <label>Date<input type="date" max={today} value={date} onChange={(event) => setDate(event.target.value)} /></label>
           <button type="button" onClick={printBranchStatus} disabled={!data || loading}>Save PDF</button>
+          <button type="button" onClick={() => setFitMode(true)} disabled={!data || loading}>Fit to screen</button>
         </div>
       </header>
 
@@ -188,9 +226,10 @@ export default function BranchStatus({ user }) {
       {loading && <div className="branch-status-message">Loading Branch Status…</div>}
       {!loading && !branchId && <div className="branch-status-message">No branch is available.</div>}
 
-      {data && !loading && <article className="branch-status-report">
+      {fitMode && <button type="button" className="branch-status-fit-exit" aria-label="Return to normal Branch Status view" onClick={() => setFitMode(false)}>← Back to report</button>}
+      {data && !loading && <article ref={reportRef} className="branch-status-report">
         <header className="branch-status-report-head">
-          <div><span>AIRTEL COMMUNICATIONS</span><h2>{branchName}</h2><p>Branch Status · {date}</p></div>
+          <div><h2>{branchName}</h2><p>Branch Status · {date}</p></div>
           <span className={`branch-status-badge ${status.toLowerCase()}`}>{status}</span>
         </header>
 
@@ -200,7 +239,6 @@ export default function BranchStatus({ user }) {
             {[
               { key: "mobile", label: "Mobile Money", withTransactions: true },
               { key: "banks", label: "Banks", withTransactions: true },
-              { key: "others", label: "Others", withTransactions: false },
             ].map((group) => {
               const rows = groupedItems[group.key];
               const balanceTotal = rows.filter((item) => item.hasBalance).reduce((sum, item) => sum + Number(item.amount || 0), 0);
@@ -236,7 +274,7 @@ export default function BranchStatus({ user }) {
           <div className="branch-status-shortage-total"><span>Shortage</span><strong className={figureTone(totals.totalShortageBalance, "shortage-figure")}>{money(totals.totalShortageBalance)}</strong></div>
           <div className="branch-status-extra-info">
             <div className="branch-status-reason"><span>Reason</span><strong>{data.reason || "—"}</strong></div>
-            <div className="branch-status-accessories-info"><span>Accessories Sales</span><strong className={figureTone(data.accessoriesCount)}>{money(data.accessoriesCount)}</strong></div>
+            <div className="branch-status-accessories-info"><span>Accessories Sales</span><strong className={figureTone(data.accessoriesCount)}>{compactNumber(data.accessoriesCount)}</strong></div>
           </div>
         </section>
 
@@ -244,6 +282,7 @@ export default function BranchStatus({ user }) {
           <div className="branch-status-card">
             <h3>Cashbook</h3>
             <div className="branch-status-table">
+              <div className="branch-status-expenses-heading">Expenses</div>
               {(cashBook.expenses || []).map((expense) => <div className="branch-status-row" key={expense.id}><span>{expense.description || expense.category || "Expense"}</span><strong className={figureTone(expense.amount)}>{money(expense.amount)}</strong></div>)}
               {!(cashBook.expenses || []).length && <div className="branch-status-empty">No expenses recorded</div>}
               <div className="branch-status-row total"><span>Total Spent</span><strong className={figureTone(cashBook.dailyExpenses)}>{money(cashBook.dailyExpenses)}</strong></div>
@@ -255,9 +294,9 @@ export default function BranchStatus({ user }) {
           <div className="branch-status-card">
             <h3>Branch Shortage Counter</h3>
             <div className="branch-status-shortage-head"><span>Name</span><span>Amount Owed</span><span>Paid Off</span><span>Balance</span></div>
-            {(shortages || []).map((item) => <div className="branch-status-shortage-row" key={item.employeeId || item.employee_id}><span>{item.employee_name || item.name || "—"}</span><strong className={figureTone(item.amountOwed ?? item.amount_owed, "shortage-figure")}>{money(item.amountOwed ?? item.amount_owed)}</strong><strong className={figureTone(item.paymentsToday ?? item.payments_today)}>{money(item.paymentsToday ?? item.payments_today)}</strong><strong className={figureTone(item.balance, "shortage-figure")}>{money(item.balance)}</strong></div>)}
+            {(shortages || []).map((item) => <div className="branch-status-shortage-row" key={item.employeeId || item.employee_id}><span>{item.employee_name || item.name || "—"}</span><strong className={figureTone(item.amountOwed ?? item.amount_owed, "shortage-figure")}>{compactNumber(item.amountOwed ?? item.amount_owed)}</strong><strong className={figureTone(item.paymentsToday ?? item.payments_today)}>{compactNumber(item.paymentsToday ?? item.payments_today)}</strong><strong className={figureTone(item.balance, "shortage-figure")}>{compactNumber(item.balance)}</strong></div>)}
             {!shortages.length && <div className="branch-status-empty">No outstanding shortages</div>}
-            <div className="branch-status-shortage-row total"><span>Total</span><strong className="shortage-figure">{money(shortages.reduce((sum, item) => sum + Number(item.amountOwed ?? item.amount_owed ?? 0), 0))}</strong><strong>{money(shortages.reduce((sum, item) => sum + Number(item.paymentsToday ?? item.payments_today ?? 0), 0))}</strong><strong className="shortage-figure">{money(totals.totalShortageBalance ?? shortages.reduce((sum, item) => sum + Number(item.balance || 0), 0))}</strong></div>
+            <div className="branch-status-shortage-row total"><span>Total</span><strong className="shortage-figure">{compactNumber(shortages.reduce((sum, item) => sum + Number(item.amountOwed ?? item.amount_owed ?? 0), 0))}</strong><strong>{compactNumber(shortages.reduce((sum, item) => sum + Number(item.paymentsToday ?? item.payments_today ?? 0), 0))}</strong><strong className="shortage-figure">{compactNumber(totals.totalShortageBalance ?? shortages.reduce((sum, item) => sum + Number(item.balance || 0), 0))}</strong></div>
           </div>
         </section>
         <footer className="branch-status-foot">Figures are consolidated across the branch for the selected business date.</footer>

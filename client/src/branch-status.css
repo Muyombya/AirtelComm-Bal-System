@@ -14,8 +14,73 @@
 .negative-figure{color:#b91c1c!important}.shortage-figure{color:#b91c1c!important}
 @media print{body{margin:0;padding:10mm;background:#fff!important}.branch-status-page{width:100%;max-width:none;padding:0;margin:0}.branch-status-report{width:100%;max-width:none;margin:0;border:0;border-radius:0;box-shadow:none;padding:0}.branch-status-report-head{display:flex!important;text-align:center}.branch-status-report-head>div{text-align:center!important}.branch-status-report-head .branch-status-badge{position:absolute;right:0}.branch-status-card,.branch-status-capital{break-inside:avoid;page-break-inside:avoid}.branch-status-page *{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
 
-.branch-status-consolidated{border:1px solid #d8e0e8;border-radius:8px;overflow:hidden;margin-bottom:10px}.branch-status-consolidated>h3{margin:0;padding:5px 8px;background:#edf3f8;color:#24496d;font-size:10px;text-align:center;text-transform:uppercase;letter-spacing:.04em}.branch-status-group-grid{display:grid;grid-template-columns:1.08fr 1.08fr .86fr;gap:0}.branch-status-group{min-width:0;border-right:1px solid #aebdcc}.branch-status-group:last-child{border-right:0}.branch-status-group h4{margin:0;padding:4px 2px;background:#dce9f5;color:#24496d;border-bottom:1px solid #aebdcc;text-align:center;text-transform:uppercase;font-size:8px;letter-spacing:.04em}.branch-status-group-columns,.branch-status-group-row,.branch-status-group-total{display:grid;grid-template-columns:minmax(0,1.12fr) minmax(0,1fr);gap:2px;align-items:center;padding:3px 3px;border-bottom:1px solid #edf0f3;font-size:8px}.branch-status-group-columns.with-transactions,.branch-status-group-row.with-transactions,.branch-status-group-total.with-transactions{grid-template-columns:minmax(0,1.05fr) minmax(0,1fr) minmax(20px,.48fr)}.branch-status-group-columns{min-height:22px;background:#f7f9fb;color:#63748a;text-align:center;text-transform:uppercase;font-size:6.5px;font-weight:800}.branch-status-group-columns span:first-child{text-align:left}.branch-status-group-row>span{min-width:0;overflow-wrap:anywhere}.branch-status-group-row>strong,.branch-status-group-total>strong,.branch-status-group-sales>strong{text-align:center;white-space:nowrap;font-size:7.5px;font-variant-numeric:tabular-nums}.branch-status-group-total{background:#f1f5f8;font-weight:800}.branch-status-group-empty{padding:5px 3px;text-align:center;color:#68788a;font-size:8px}.branch-status-group-sales{display:grid;grid-template-columns:1fr auto;gap:2px;align-items:center;padding:4px 3px;background:#eef4fa;color:#24496d;font-size:7px;font-weight:800}.branch-status-group-sales strong{padding:2px 4px;background:#fff}.branch-status-consolidated-totals{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:5px 8px;background:#dce9f5;border-top:1px solid #aebdcc}.branch-status-consolidated-totals>div{display:flex;justify-content:space-between;gap:6px;align-items:center;font-size:8px;font-weight:800}.branch-status-consolidated-totals strong{font-size:9px;white-space:nowrap;font-variant-numeric:tabular-nums}
-@media(max-width:650px){.branch-status-consolidated{margin-bottom:7px}.branch-status-group-grid{grid-template-columns:1.08fr 1.08fr .86fr}.branch-status-group-columns,.branch-status-group-row,.branch-status-group-total{padding:3px 2px}.branch-status-group h4{font-size:7.5px}.branch-status-group-row>strong,.branch-status-group-total>strong{font-size:7px}.branch-status-consolidated-totals{padding:5px}.branch-status-consolidated-totals>div{font-size:7px}.branch-status-consolidated-totals strong{font-size:8px}}
-@media print{.branch-status-consolidated{break-inside:avoid;page-break-inside:avoid;margin-bottom:6px}.branch-status-consolidated>h3{font-size:8px;padding:4px}.branch-status-group h4{font-size:7px;padding:3px}.branch-status-group-columns,.branch-status-group-row,.branch-status-group-total{padding:2px;font-size:7px}.branch-status-group-row>strong,.branch-status-group-total>strong,.branch-status-group-sales>strong{font-size:6.5px}.branch-status-consolidated-totals{padding:4px}}
+.branch-status-consolidated{border:1px solid #d8e0e8;border-radius:8px;overflow:hidden;margin-bottom:10px}.branch-status-consolidated>h3{margin:0;padding:5px 8px;background:#edf3f8;color:#24496d;font-size:10px;text-align:center;text-transform:uppercase;letter-spacing:.04em}.branch-status-group-grid{display:grid;grid-template-columns:1fr 1fr;gap:0}.branch-status-group{min-width:0;border-right:1px solid #aebdcc}.branch-status-group:last-child{border-right:0}.branch-status-group h4{margin:0;padding:4px 2px;background:#dce9f5;color:#24496d;border-bottom:1px solid #aebdcc;text-align:center;text-transform:uppercase;font-size:8px;letter-spacing:.04em}.branch-status-group-columns,.branch-status-group-row,.branch-status-group-total{display:grid;grid-template-columns:minmax(0,1.12fr) minmax(0,1fr);gap:2px;align-items:center;padding:3px 3px;border-bottom:1px solid #edf0f3;font-size:8px}.branch-status-group-columns.with-transactions,.branch-status-group-row.with-transactions,.branch-status-group-total.with-transactions{grid-template-columns:minmax(0,1.05fr) minmax(0,1fr) minmax(20px,.48fr)}.branch-status-group-columns{min-height:22px;background:#f7f9fb;color:#63748a;text-align:center;text-transform:uppercase;font-size:6.5px;font-weight:800}.branch-status-group-columns span:first-child{text-align:left}.branch-status-group-row>span{min-width:0;overflow-wrap:anywhere}.branch-status-group-row>strong,.branch-status-group-total>strong{text-align:center;white-space:nowrap;font-size:7.5px;font-variant-numeric:tabular-nums}.branch-status-group-total{background:#f1f5f8;font-weight:800}.branch-status-group-empty{padding:5px 3px;text-align:center;color:#68788a;font-size:8px}.branch-status-consolidated-totals{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:5px 8px;background:#dce9f5;border-top:1px solid #aebdcc}.branch-status-consolidated-totals>div{display:flex;justify-content:space-between;gap:6px;align-items:center;font-size:8px;font-weight:800}.branch-status-consolidated-totals strong{font-size:9px;white-space:nowrap;font-variant-numeric:tabular-nums}
+@media(max-width:650px){.branch-status-consolidated{margin-bottom:7px}.branch-status-group-grid{grid-template-columns:1fr 1fr}.branch-status-group-columns,.branch-status-group-row,.branch-status-group-total{padding:3px 2px}.branch-status-group h4{font-size:7.5px}.branch-status-group-row>strong,.branch-status-group-total>strong{font-size:7px}.branch-status-consolidated-totals{padding:5px}.branch-status-consolidated-totals>div{font-size:7px}.branch-status-consolidated-totals strong{font-size:8px}}
+@media print{.branch-status-consolidated{break-inside:avoid;page-break-inside:avoid;margin-bottom:6px}.branch-status-consolidated>h3{font-size:8px;padding:4px}.branch-status-group h4{font-size:7px;padding:3px}.branch-status-group-columns,.branch-status-group-row,.branch-status-group-total{padding:2px;font-size:7px}.branch-status-group-row>strong,.branch-status-group-total>strong{font-size:6.5px}.branch-status-consolidated-totals{padding:4px}}
 .branch-status-extra-info{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;margin-top:1px;border-top:1px solid #d7e0e8}.branch-status-extra-info .branch-status-reason{grid-column:auto;display:grid;grid-template-columns:auto 1fr;align-items:center;gap:7px;margin:0;padding:6px 8px;border:0;border-right:1px solid #c5d0da;font-size:9px}.branch-status-extra-info .branch-status-reason span{margin:0}.branch-status-extra-info .branch-status-reason strong{font-weight:500;overflow-wrap:anywhere}.branch-status-accessories-info{display:flex;justify-content:space-between;align-items:center;gap:7px;padding:6px 8px;font-size:9px;font-weight:800}.branch-status-accessories-info span,.branch-status-accessories-info strong{font-weight:800}.branch-status-consolidated-totals>div:first-child{border-right:1px solid #aebdcc;padding-right:8px}.branch-status-consolidated-totals>div+div{padding-left:2px}
 @media print{.branch-status-extra-info .branch-status-reason,.branch-status-accessories-info{padding:4px 6px;font-size:8px}.branch-status-consolidated-totals>div:first-child{padding-right:5px}}
+@media(max-width:650px){.branch-status-group-grid{grid-template-columns:1fr}.branch-status-group{border-right:0;border-bottom:1px solid #aebdcc}.branch-status-group:last-child{border-bottom:0}.branch-status-group h4{font-size:9px;padding:3px}.branch-status-group-columns,.branch-status-group-row,.branch-status-group-total{grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);padding:3px 5px;font-size:8.5px}.branch-status-group-columns.with-transactions,.branch-status-group-row.with-transactions,.branch-status-group-total.with-transactions{grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(36px,.5fr)}.branch-status-group-columns{font-size:7px}.branch-status-group-row>strong,.branch-status-group-total>strong{font-size:8px}.branch-status-card h3{display:flex;justify-content:space-between;align-items:center}.branch-status-card h3 small{font-size:7px}.branch-status-shortage-head,.branch-status-shortage-row{grid-template-columns:minmax(0,.9fr) repeat(3,minmax(0,.8fr));gap:2px;padding:4px 2px;font-size:6px}.branch-status-shortage-head{font-size:5.8px}.branch-status-shortage-row>span{font-size:6px}.branch-status-shortage-row strong{font-size:6px;letter-spacing:-.03em}.branch-status-accessories-info{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px;padding:4px;font-size:7.5px}.branch-status-accessories-info span{white-space:nowrap;font-size:7px}.branch-status-accessories-info span small{font-size:6px}.branch-status-accessories-info strong{white-space:nowrap;font-size:7.5px}}
+@media(max-width:650px){.branch-status-bottom-grid{grid-template-columns:minmax(0,1fr)}.branch-status-shortage-head,.branch-status-shortage-row{grid-template-columns:minmax(0,1.15fr) repeat(3,minmax(0,1fr));gap:4px;padding:5px 6px;font-size:8px}.branch-status-shortage-head{font-size:7px}.branch-status-shortage-row>span{font-size:8px}.branch-status-shortage-row strong{font-size:8px;letter-spacing:0}.branch-status-report-head{padding-bottom:6px;margin-bottom:8px}.branch-status-report-head h2{font-size:18px;margin:0}.branch-status-report{padding:8px}}
+@media print{.branch-status-report-head>div>span{display:none}.branch-status-report-head h2{margin:0}}
+
+/* Compact phone layout: preserve side-by-side sections and reduce row chrome. */
+@media(max-width:650px){
+  .branch-status-page{padding:7px}
+  .branch-status-controls{gap:6px;margin-bottom:7px}
+  .branch-status-controls h1{font-size:18px}
+  .branch-status-filters{gap:5px}
+  .branch-status-filters label{font-size:9px}
+  .branch-status-filters select,.branch-status-filters input,.branch-status-filters button{min-height:30px;padding:4px 6px;font-size:10px}
+  .branch-status-report{padding:6px;border-radius:8px}
+  .branch-status-report-head{padding-bottom:4px;margin-bottom:5px}
+  .branch-status-report-head h2{font-size:15px}
+  .branch-status-report-head p{font-size:8px}
+  .branch-status-badge{padding:3px 6px;font-size:7px}
+  .branch-status-consolidated{margin-bottom:5px}
+  .branch-status-group-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important}
+  .branch-status-group{border-right:1px solid #aebdcc;border-bottom:0}
+  .branch-status-group:last-child{border-right:0}
+  .branch-status-group h4{font-size:7px;padding:3px 1px}
+  .branch-status-group-columns,.branch-status-group-row,.branch-status-group-total{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1px;padding:2px;font-size:6.5px}
+  .branch-status-group-columns.with-transactions,.branch-status-group-row.with-transactions,.branch-status-group-total.with-transactions{grid-template-columns:minmax(0,1.05fr) minmax(0,1fr) minmax(15px,.48fr)}
+  .branch-status-group-columns{min-height:16px;font-size:5.5px}
+  .branch-status-group-row>strong,.branch-status-group-total>strong{font-size:6px;letter-spacing:-.03em}
+  .branch-status-group-empty{padding:3px;font-size:6px}
+  .branch-status-consolidated-totals{gap:4px;padding:3px 5px}
+  .branch-status-consolidated-totals>div{gap:2px;font-size:6px}
+  .branch-status-consolidated-totals strong{font-size:6.5px}
+  .branch-status-capital{gap:4px;margin:5px 0;padding:5px}
+  .branch-status-capital>div{gap:2px}
+  .branch-status-capital span{font-size:6px}
+  .branch-status-capital strong{font-size:8px;overflow-wrap:anywhere}
+  .branch-status-shortage-total{padding:4px}
+  .branch-status-extra-info .branch-status-reason,.branch-status-accessories-info{gap:3px;padding:4px;font-size:6.5px}
+  .branch-status-accessories-info span,.branch-status-accessories-info strong{font-size:6.5px}
+  .branch-status-bottom-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;gap:4px}
+  .branch-status-card h3{font-size:7px;padding:4px;letter-spacing:0}
+  .branch-status-table{padding:1px 3px}
+  .branch-status-row{gap:2px;padding:3px 0;font-size:6.5px;line-height:1.1}
+  .branch-status-row strong{font-size:6px;letter-spacing:-.03em}
+  .branch-status-empty{padding:4px 0;font-size:6px}
+  .branch-status-shortage-head,.branch-status-shortage-row{grid-template-columns:minmax(0,1.05fr) repeat(3,minmax(0,1fr));gap:1px;padding:3px 2px;font-size:5.5px;line-height:1.1}
+  .branch-status-shortage-head{font-size:5px}
+  .branch-status-shortage-head span{overflow-wrap:anywhere;text-align:center}
+  .branch-status-shortage-row>span{font-size:5.5px;line-height:1.1}
+  .branch-status-shortage-row strong{font-size:5.5px;letter-spacing:-.04em}
+  .branch-status-foot{padding-top:4px;font-size:6px}
+}
+
+.branch-status-fit-exit{display:none}
+body.branch-status-fit-active .app-nav{visibility:hidden}
+.branch-status-page.fit-mode{position:fixed;z-index:10000;inset:0;width:100vw;height:100dvh;max-width:none;margin:0;padding:42px 6px 6px;overflow:hidden;display:flex;justify-content:center;align-items:flex-start;background:#e8eef4}
+.branch-status-page.fit-mode .branch-status-controls,.branch-status-page.fit-mode .branch-status-message{display:none}
+.branch-status-page.fit-mode .branch-status-report{flex:none;width:min(100%,1000px);max-width:none;margin:0;transform:scale(var(--branch-status-fit-scale,1));transform-origin:top center}
+.branch-status-fit-exit{position:fixed;z-index:10001;top:5px;right:6px;min-height:32px;padding:5px 10px;border:0;border-radius:7px;background:#123f77;color:#fff;font-weight:700}
+@media(max-width:650px){.branch-status-page.fit-mode{padding:42px 4px 4px}}
+@media print{.branch-status-fit-exit{display:none!important}.branch-status-page.fit-mode{position:static;width:auto;height:auto;padding:0;overflow:visible;display:block;background:#fff}.branch-status-page.fit-mode .branch-status-report{transform:none}}
+
+.branch-status-consolidated>h3,.branch-status-group h4,.branch-status-card h3{font-weight:900;text-align:center}
+.branch-status-card h3{display:block}
+.branch-status-expenses-heading{padding:3px 0;border-bottom:1px solid #cbd5df;color:#52677f;text-align:center;text-transform:uppercase;font-size:8px;font-weight:900;letter-spacing:.05em}
+.branch-status-fit-exit{display:block;cursor:pointer;box-shadow:0 2px 8px #102c4a40}
+@media(max-width:650px){.branch-status-expenses-heading{padding:2px 0;font-size:6px}.branch-status-fit-exit{top:5px;right:5px;min-height:30px;padding:5px 9px;font-size:12px}}
