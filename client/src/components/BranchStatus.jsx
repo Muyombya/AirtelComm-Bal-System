@@ -41,34 +41,187 @@ function printBranchStatus() {
   printWindow.document.close();
 }
 
-function inlineComputedStyles(source, clone) {
-  if (source.nodeType === Node.ELEMENT_NODE && clone.nodeType === Node.ELEMENT_NODE) {
-    const computed = window.getComputedStyle(source);
-    clone.setAttribute("style", [...computed].map((name) => `${name}:${computed.getPropertyValue(name)}`).join(";"));
-  }
-  const sourceChildren = source.childNodes || [];
-  const cloneChildren = clone.childNodes || [];
-  for (let index = 0; index < Math.min(sourceChildren.length, cloneChildren.length); index += 1) {
-    inlineComputedStyles(sourceChildren[index], cloneChildren[index]);
-  }
+function escapeSvg(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[character]);
 }
 
-async function createBranchStatusImage(report) {
-  const width = Math.ceil(report.scrollWidth);
-  const height = Math.ceil(report.scrollHeight);
-  if (!width || !height) throw new Error("The report is not ready to export yet.");
+function createBranchStatusSvg({ branchName, date, status, groups, totals, transactions, cashBook, reason, accessoriesCount, shortages }) {
+  const width = 360;
+  const margin = 7;
+  const innerWidth = width - margin * 2;
+  const colWidth = innerWidth / 2;
+  const mobileRows = groups.mobile || [];
+  const bankRows = groups.banks || [];
+  const expenses = cashBook.expenses || [];
+  const shortageRows = shortages || [];
+  const maxProviderRows = Math.max(mobileRows.length, bankRows.length, 1);
+  const providerHeight = 41 + maxProviderRows * 13;
+  const cashbookHeight = Math.max(87, 75 + expenses.length * 12);
+  const shortageHeight = 18 + 22 + Math.max(shortageRows.length, 1) * 13 + 13;
+  const bottomHeight = Math.max(cashbookHeight, shortageHeight);
+  const height = 8 + 30 + providerHeight + 17 + 6 + 43 + 22 + 6 + bottomHeight + 14;
+  const shapes = [];
+  const rect = (x, y, w, h, fill, stroke = "none", radius = 0) => shapes.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${radius}" fill="${fill}" stroke="${stroke}"/>`);
+  const line = (x1, y1, x2, y2, color = "#d6e0e9", strokeWidth = 0.6) => shapes.push(`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="${strokeWidth}"/>`);
+  const text = (x, y, value, { size = 7, color = "#172a40", weight = 400, anchor = "start" } = {}) => shapes.push(`<text x="${x}" y="${y}" font-family="Arial,Helvetica,sans-serif" font-size="${size}" font-weight="${weight}" fill="${color}" text-anchor="${anchor}">${escapeSvg(value)}</text>`);
+  const amountColor = (value, shortage = false) => Number(value) < 0 || shortage ? "#b42318" : "#172a40";
+  const formatAmount = (value, currency = false) => `${currency ? "UGX " : ""}${Number(value || 0).toLocaleString("en-UG")}`;
+  const fitted = (value, max = 22) => {
+    const content = String(value ?? "—");
+    return content.length > max ? `${content.slice(0, max - 1)}…` : content;
+  };
 
-  const clone = report.cloneNode(true);
-  inlineComputedStyles(report, clone);
-  clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
-  clone.style.width = `${width}px`;
-  clone.style.maxWidth = "none";
-  clone.style.height = "auto";
-  clone.style.transform = "none";
-  clone.style.margin = "0";
+  rect(0, 0, width, height, "#edf2f7");
+  rect(margin, 5, innerWidth, height - 10, "#ffffff", "#cbd5df", 7);
+  const centerX = width / 2;
+  text(centerX, 22, branchName, { size: 14, weight: 800, anchor: "middle", color: "#173b64" });
+  text(centerX, 32, `Branch Status · ${date}`, { size: 7, anchor: "middle", color: "#64748b" });
+  const normalizedStatus = String(status || "INCOMPLETE").toUpperCase();
+  const statusColor = normalizedStatus === "SHORT" ? "#b42318" : normalizedStatus === "EXCESS" ? "#187443" : normalizedStatus === "BALANCED" ? "#187443" : "#8a5a00";
+  rect(width - 55, 11, 43, 14, normalizedStatus === "SHORT" ? "#fff0ed" : normalizedStatus === "EXCESS" || normalizedStatus === "BALANCED" ? "#e3f4eb" : "#fff2d6", "none", 7);
+  text(width - 33.5, 20, normalizedStatus, { size: 5.5, weight: 800, color: statusColor, anchor: "middle" });
+  line(margin + 7, 38, width - margin - 7, 38, "#163d68", 1);
 
-  const markup = new XMLSerializer().serializeToString(clone);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><foreignObject x="0" y="0" width="${width}" height="${height}">${markup}</foreignObject></svg>`;
+  let y = 43;
+  rect(margin + 1, y, innerWidth - 2, 15, "#eaf1f7", "#d8e0e8", 4);
+  text(centerX, y + 10, "CLOSING FLOAT AND TRANSACTIONS", { size: 7, weight: 800, anchor: "middle", color: "#24496d" });
+  y += 15;
+  [
+    { key: "mobile", label: "MOBILE MONEY", rows: mobileRows },
+    { key: "banks", label: "BANKS", rows: bankRows },
+  ].forEach((group, groupIndex) => {
+    const x = margin + groupIndex * colWidth;
+    const right = x + colWidth;
+    rect(x, y, colWidth, 12, "#dce9f5", "#aebdcc");
+    text(x + colWidth / 2, y + 8.5, group.label, { size: 6.5, weight: 800, anchor: "middle", color: "#24496d" });
+    rect(x, y + 12, colWidth, 11, "#f7f9fb", "#d8e0e8");
+    text(x + 4, y + 20, "Item", { size: 5.5, weight: 800, color: "#63748a" });
+    text(right - 36, y + 20, "Closing", { size: 5, weight: 800, color: "#63748a", anchor: "middle" });
+    text(right - 7, y + 20, "Tx", { size: 5.5, weight: 800, color: "#63748a", anchor: "end" });
+    for (let rowIndex = 0; rowIndex < maxProviderRows; rowIndex += 1) {
+      const rowY = y + 23 + rowIndex * 13;
+      line(x, rowY + 3, right, rowY + 3);
+      const item = group.rows[rowIndex];
+      if (!item) continue;
+      text(x + 4, rowY, fitted(item.name, 20), { size: 6.5 });
+      text(right - 17, rowY, item.hasBalance ? formatAmount(item.amount) : "—", { size: 5.8, color: amountColor(item.amount), anchor: "end" });
+      text(right - 4, rowY, item.hasTransactions ? formatAmount(item.count) : "—", { size: 5.8, color: amountColor(item.count), anchor: "end" });
+    }
+    const totalY = y + 23 + maxProviderRows * 13;
+    rect(x, totalY - 8, colWidth, 12, "#f1f5f8", "#d8e0e8");
+    const balanceTotal = group.rows.filter((item) => item.hasBalance).reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const transactionTotal = group.rows.filter((item) => item.hasTransactions).reduce((sum, item) => sum + Number(item.count || 0), 0);
+    text(x + 4, totalY, "Total", { size: 6, weight: 800 });
+    text(right - 17, totalY, group.rows.some((item) => item.hasBalance) ? formatAmount(balanceTotal) : "—", { size: 5.7, weight: 800, color: amountColor(balanceTotal), anchor: "end" });
+    text(right - 4, totalY, group.rows.some((item) => item.hasTransactions) ? formatAmount(transactionTotal) : "—", { size: 5.7, weight: 800, color: amountColor(transactionTotal), anchor: "end" });
+  });
+  y += 23 + maxProviderRows * 13 + 4;
+  rect(margin + 1, y, innerWidth - 2, 14, "#dce9f5", "#aebdcc");
+  text(margin + 8, y + 9.5, "TOTAL FLOAT", { size: 6, weight: 800, color: "#24496d" });
+  text(margin + colWidth - 6, y + 9.5, formatAmount(totals.totalFloat, true), { size: 7, weight: 800, anchor: "end" });
+  line(centerX, y + 2, centerX, y + 12, "#aebdcc");
+  text(centerX + 6, y + 9.5, "TOTAL TXNS", { size: 6, weight: 800, color: "#24496d" });
+  text(width - margin - 8, y + 9.5, transactions.reduce((sum, item) => sum + Number(item.count || 0), 0).toLocaleString("en-UG"), { size: 7, weight: 800, anchor: "end" });
+
+  y += 18;
+  const metrics = [
+    ["TOTAL CASH", totals.totalCash],
+    ["BRANCH CAPITAL", totals.branchCapital],
+    ["OPERATING CAPITAL", totals.branchOperatingCapital],
+    ["SHORTAGE", totals.totalShortageBalance],
+  ];
+  metrics.forEach(([label, value], index) => {
+    const x = margin + 1 + (index % 2) * colWidth;
+    const rowY = y + Math.floor(index / 2) * 20;
+    rect(x, rowY, colWidth - 1, 19, label === "SHORTAGE" ? "#fff0ed" : "#f0f5f9", "#d8e0e8", 3);
+    text(x + 5, rowY + 7, label, { size: 5.5, weight: 800, color: "#63748a" });
+    text(x + 5, rowY + 15.5, formatAmount(value, true), { size: 7, weight: 800, color: amountColor(value, label === "SHORTAGE") });
+  });
+  y += 43;
+  rect(margin + 1, y, innerWidth - 2, 19, "#f7f9fb", "#d8e0e8", 3);
+  text(margin + 6, y + 11.5, `REASON  ${fitted(reason || "—", 34)}`, { size: 6.2, color: "#334155" });
+  line(centerX, y + 3, centerX, y + 16);
+  text(centerX + 6, y + 8, "ACCESSORIES SALES", { size: 5.3, weight: 800, color: "#63748a" });
+  text(centerX + 6, y + 15, formatAmount(accessoriesCount), { size: 7, weight: 800, color: amountColor(accessoriesCount) });
+
+  y += 24;
+  const bottomTop = y;
+  const cashX = margin;
+  const shortageX = margin + colWidth;
+  const cardWidth = colWidth;
+  rect(cashX, bottomTop, cardWidth, bottomHeight, "#ffffff", "#d8e0e8", 4);
+  rect(shortageX, bottomTop, cardWidth, bottomHeight, "#ffffff", "#d8e0e8", 4);
+  [
+    [cashX, "CASHBOOK"],
+    [shortageX, "BRANCH SHORTAGE COUNTER"],
+  ].forEach(([x, heading]) => {
+    rect(x, bottomTop, cardWidth, 14, "#eaf1f7", "none", 4);
+    text(x + cardWidth / 2, bottomTop + 9.5, heading, { size: heading.length > 15 ? 5.4 : 6.5, weight: 900, color: "#24496d", anchor: "middle" });
+  });
+
+  let cashY = bottomTop + 14;
+  text(cashX + cardWidth / 2, cashY + 8, "EXPENSES", { size: 5.6, weight: 800, color: "#63748a", anchor: "middle" });
+  line(cashX + 3, cashY + 10, cashX + cardWidth - 3, cashY + 10);
+  cashY += 18;
+  expenses.forEach((expense) => {
+    text(cashX + 4, cashY + 6, fitted(expense.description || expense.category || "Expense", 18), { size: 5.8, weight: 600 });
+    text(cashX + cardWidth - 4, cashY + 6, formatAmount(expense.amount, true), { size: 5.6, weight: 700, color: amountColor(expense.amount), anchor: "end" });
+    line(cashX + 3, cashY + 9, cashX + cardWidth - 3, cashY + 9);
+    cashY += 12;
+  });
+  if (!expenses.length) {
+    text(cashX + 5, cashY + 6, "No expenses recorded", { size: 5.8, color: "#68788a" });
+    cashY += 12;
+  }
+  [
+    ["Total Spent", cashBook.dailyExpenses, true],
+    ["Funds Added", cashBook.dailyTopUps, false],
+    ["Opening Balance", cashBook.openingBalance, false],
+    ["Closing Balance", cashBook.closingBalance, true],
+  ].forEach(([label, value, bold]) => {
+    text(cashX + 4, cashY + 7, label, { size: 5.6, weight: bold ? 800 : 500 });
+    text(cashX + cardWidth - 4, cashY + 7, formatAmount(value, true), { size: 5.5, weight: bold ? 800 : 500, color: amountColor(value), anchor: "end" });
+    cashY += 11;
+  });
+
+  let shortageY = bottomTop + 14;
+  const nameX = shortageX + 3;
+  const owedX = shortageX + 71;
+  const paidX = shortageX + 106;
+  const balanceX = shortageX + cardWidth - 3;
+  text(nameX, shortageY + 10, "NAME", { size: 5, weight: 800, color: "#63748a" });
+  text(owedX, shortageY + 10, "OWED", { size: 5, weight: 800, color: "#63748a", anchor: "middle" });
+  text(paidX, shortageY + 10, "PAID", { size: 5, weight: 800, color: "#63748a", anchor: "middle" });
+  text(balanceX, shortageY + 10, "BALANCE", { size: 5, weight: 800, color: "#63748a", anchor: "end" });
+  line(shortageX + 3, shortageY + 13, shortageX + cardWidth - 3, shortageY + 13);
+  shortageY += 19;
+  shortageRows.forEach((item) => {
+    text(nameX, shortageY + 7, fitted(item.employee_name || item.name || "—", 12), { size: 5.2 });
+    text(owedX, shortageY + 7, formatAmount(item.amountOwed ?? item.amount_owed), { size: 5, color: amountColor(item.amountOwed ?? item.amount_owed, true), anchor: "middle" });
+    text(paidX, shortageY + 7, formatAmount(item.paymentsToday ?? item.payments_today), { size: 5, anchor: "middle" });
+    text(balanceX, shortageY + 7, formatAmount(item.balance), { size: 5, color: amountColor(item.balance, true), anchor: "end" });
+    shortageY += 13;
+  });
+  if (!shortageRows.length) {
+    text(shortageX + 6, shortageY + 7, "No outstanding shortages", { size: 5.5, color: "#68788a" });
+    shortageY += 13;
+  }
+  line(shortageX + 3, shortageY + 1, shortageX + cardWidth - 3, shortageY + 1, "#aebdcc", 0.8);
+  const totalOwed = shortageRows.reduce((sum, item) => sum + Number(item.amountOwed ?? item.amount_owed ?? 0), 0);
+  const totalPaid = shortageRows.reduce((sum, item) => sum + Number(item.paymentsToday ?? item.payments_today ?? 0), 0);
+  const totalBalance = totals.totalShortageBalance ?? shortageRows.reduce((sum, item) => sum + Number(item.balance || 0), 0);
+  text(nameX, shortageY + 8, "TOTAL", { size: 5.3, weight: 900 });
+  text(owedX, shortageY + 8, formatAmount(totalOwed), { size: 4.8, weight: 800, color: amountColor(totalOwed, true), anchor: "middle" });
+  text(paidX, shortageY + 8, formatAmount(totalPaid), { size: 4.8, weight: 800, anchor: "middle" });
+  text(balanceX, shortageY + 8, formatAmount(totalBalance), { size: 4.8, weight: 800, color: amountColor(totalBalance, true), anchor: "end" });
+
+  y = bottomTop + bottomHeight;
+  text(centerX, y + 9, "Figures consolidated across the branch for the selected date.", { size: 5.4, color: "#758397", anchor: "middle" });
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="${height * 2}" viewBox="0 0 ${width} ${height}">${shapes.join("")}</svg>`;
+}
+
+async function createBranchStatusImage(reportData) {
+  const svg = createBranchStatusSvg(reportData);
   const svgUrl = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
   try {
     const image = new Image();
@@ -77,17 +230,12 @@ async function createBranchStatusImage(report) {
       image.onerror = () => reject(new Error("Could not render the report image in this browser."));
       image.src = svgUrl;
     });
-
-    const resolution = 2;
     const canvas = document.createElement("canvas");
-    canvas.width = width * resolution;
-    canvas.height = height * resolution;
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
     const context = canvas.getContext("2d");
     if (!context) throw new Error("Could not prepare the report image.");
-    context.scale(resolution, resolution);
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, width, height);
-    context.drawImage(image, 0, 0, width, height);
+    context.drawImage(image, 0, 0);
     return await new Promise((resolve, reject) => {
       canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Could not create the PNG file.")), "image/png");
     });
@@ -268,7 +416,18 @@ export default function BranchStatus({ user }) {
     setSharingImage(true);
     setShareMessage("");
     try {
-      const blob = await createBranchStatusImage(reportRef.current);
+      const blob = await createBranchStatusImage({
+        branchName,
+        date,
+        status,
+        groups: groupedItems,
+        totals,
+        transactions,
+        cashBook,
+        reason: data?.reason,
+        accessoriesCount: data?.accessoriesCount,
+        shortages,
+      });
       const safeBranch = branchName.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "") || "Branch";
       const file = new File([blob], `Branch-Status-${safeBranch}-${date}.png`, { type: "image/png" });
       const title = `${branchName} Branch Status · ${date}`;
