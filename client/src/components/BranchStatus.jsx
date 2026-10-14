@@ -92,28 +92,31 @@ function createBranchStatusSvg({ branchName, date, status, groups, totals, trans
   ].forEach((group, groupIndex) => {
     const x = margin + groupIndex * colWidth;
     const right = x + colWidth;
+    const itemStart = x + 9;
+    const balanceEdge = right - 47;
+    const transactionEdge = right - 15;
     rect(x, y, colWidth, 12, "#dce9f5", "#aebdcc");
     text(x + colWidth / 2, y + 8.5, group.label, { size: 6.5, weight: 800, anchor: "middle", color: "#24496d" });
     rect(x, y + 12, colWidth, 15, "#f7f9fb", "#d8e0e8");
-    text(x + 4, y + 22, "Item", { size: 5.5, weight: 800, color: "#63748a" });
-    text(right - 53, y + 22, "Closing Bal", { size: 5, weight: 800, color: "#63748a", anchor: "middle" });
-    text(right - 12, y + 22, "Tx", { size: 5.5, weight: 800, color: "#63748a", anchor: "middle" });
+    text(itemStart, y + 22, "Item", { size: 5.5, weight: 800, color: "#63748a" });
+    text(right - 63, y + 22, "Closing Bal", { size: 5, weight: 800, color: "#63748a", anchor: "middle" });
+    text(right - 19, y + 22, "Tx", { size: 5.5, weight: 800, color: "#63748a", anchor: "middle" });
     for (let rowIndex = 0; rowIndex < maxProviderRows; rowIndex += 1) {
       const rowY = y + 31 + rowIndex * 13;
       line(x, rowY + 4, right, rowY + 4);
       const item = group.rows[rowIndex];
       if (!item) continue;
-      text(x + 4, rowY, fitted(item.name, 20), { size: 6.5 });
-      text(right - 25, rowY, item.hasBalance ? formatAmount(item.amount) : "—", { size: 5.8, color: amountColor(item.amount), anchor: "end" });
-      text(right - 4, rowY, item.hasTransactions ? formatAmount(item.count) : "—", { size: 5.8, color: amountColor(item.count), anchor: "end" });
+      text(itemStart, rowY, fitted(item.name, 20), { size: 6.5 });
+      text(balanceEdge, rowY, item.hasBalance ? formatAmount(item.amount) : "—", { size: 5.8, color: amountColor(item.amount), anchor: "end" });
+      text(transactionEdge, rowY, item.hasTransactions ? formatAmount(item.count) : "—", { size: 5.8, color: amountColor(item.count), anchor: "end" });
     }
     const totalY = y + 31 + maxProviderRows * 13;
     rect(x, totalY - 9, colWidth, 13, "#f1f5f8", "#d8e0e8");
     const balanceTotal = group.rows.filter((item) => item.hasBalance).reduce((sum, item) => sum + Number(item.amount || 0), 0);
     const transactionTotal = group.rows.filter((item) => item.hasTransactions).reduce((sum, item) => sum + Number(item.count || 0), 0);
-    text(x + 4, totalY, "Total", { size: 6, weight: 800 });
-    text(right - 25, totalY, group.rows.some((item) => item.hasBalance) ? formatAmount(balanceTotal) : "—", { size: 5.7, weight: 800, color: amountColor(balanceTotal), anchor: "end" });
-    text(right - 4, totalY, group.rows.some((item) => item.hasTransactions) ? formatAmount(transactionTotal) : "—", { size: 5.7, weight: 800, color: amountColor(transactionTotal), anchor: "end" });
+    text(itemStart, totalY, "Total", { size: 6, weight: 800 });
+    text(balanceEdge, totalY, group.rows.some((item) => item.hasBalance) ? formatAmount(balanceTotal) : "—", { size: 5.7, weight: 800, color: amountColor(balanceTotal), anchor: "end" });
+    text(transactionEdge, totalY, group.rows.some((item) => item.hasTransactions) ? formatAmount(transactionTotal) : "—", { size: 5.7, weight: 800, color: amountColor(transactionTotal), anchor: "end" });
   });
   y += 35 + maxProviderRows * 13;
   rect(margin + 1, y, innerWidth - 2, 14, "#dce9f5", "#aebdcc");
