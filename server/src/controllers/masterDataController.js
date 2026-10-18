@@ -154,7 +154,7 @@ export async function setTillAssignment(req,res,next){
   try{
     const tillId=Number(req.params.tillId); const employeeId=req.body?.employeeId ? Number(req.body.employeeId) : null;
     await client.query("BEGIN");
-    const till=await client.query("SELECT id FROM tills WHERE id=$1 AND status='ACTIVE' FOR UPDATE",[tillId]);
+    const till=await client.query("SELECT id,branch_id FROM tills WHERE id=$1 AND status='ACTIVE' FOR UPDATE",[tillId]);
     if(!till.rowCount){await client.query("ROLLBACK");return res.status(400).json({error:"Active Till not found."});}
     await client.query("UPDATE till_assignments SET ended_at=NOW() WHERE till_id=$1 AND ended_at IS NULL",[tillId]);
     if(employeeId){
@@ -162,6 +162,8 @@ export async function setTillAssignment(req,res,next){
       if(!employee.rowCount){await client.query("ROLLBACK");return res.status(400).json({error:"Employee not found."});}
       await client.query("UPDATE till_assignments SET ended_at=NOW() WHERE employee_id=$1 AND ended_at IS NULL",[employeeId]);
       await client.query("INSERT INTO till_assignments(till_id,employee_id) VALUES($1,$2)",[tillId,employeeId]);
+      await client.query("DELETE FROM branch_employees WHERE employee_id=$1 AND branch_id<>$2",[employeeId,till.rows[0].branch_id]);
+      await client.query(`INSERT INTO branch_employees(branch_id,employee_id) VALUES($1,$2) ON CONFLICT (branch_id,employee_id) DO NOTHING`,[till.rows[0].branch_id,employeeId]);
     }
     await client.query("COMMIT");
     res.json({success:true});

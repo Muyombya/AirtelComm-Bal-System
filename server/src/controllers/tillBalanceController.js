@@ -1,5 +1,14 @@
 import { pool } from "../config/database.js";
 
+function databaseDate(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
+  const raw = String(value ?? "").trim();
+  const datePrefix = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (datePrefix) return datePrefix[1];
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? raw : parsed.toISOString().slice(0, 10);
+}
+
 function positiveId(value, label) {
   const id = Number(value);
   if (!Number.isInteger(id) || id <= 0) {
@@ -227,22 +236,54 @@ export async function createTillBalance(req, res, next) {
     const difference = actualTillCapital - operatingCapital;
     const status = difference < 0 ? "SHORT" : difference > 0 ? "EXCESS" : "BALANCED";
 
-    // Every Record Balance is a permanent history event. A SHORT balance is
-    // also a complete, independent shortage event. It must never be reduced
-    // by the previous Till Balance difference because a previous shortage may
-    // already have been partially or fully recovered through an explicit
-    // settlement allocation. Settlement is event-specific and is the only
-    // mechanism that reduces an event's outstanding amount.
-    //
-    // Example:
-    //   Event #1: shortage 600,000; settlement 500,000 => outstanding 100,000
-    //   Event #2: shortage 1,000,000                     => outstanding 1,000,000
-    //   Total outstanding                                 = 1,100,000
-    //
-    // Therefore shortage_event_amount must equal the full shortage observed
-    // by this balancing session, not current shortage minus previous shortage.
     const currentShortage = difference < 0 ? Math.abs(difference) : 0;
-    const shortageEventAmount = Number(currentShortage.toFixed(2));
+    // The observed Till shortage is a snapshot of the shortage still present,
+    // not automatically a new shortage on every balancing. Compare it with
+    // the Till's existing unpaid liabilities as of this business date. Linked
+    // outside-Till responsibilities retain the source Till liability; only
+    // their repayments reduce that source total. Separate responsibilities
+    // tied to this Till are included as well.
+    const outstandingResult = await client.query(
+      `WITH till_events AS (
+         SELECT p.till_balance_id,p.shortage,
+                COALESCE(SUM(a.amount) FILTER (WHERE bsp.id IS NOT NULL),0)::NUMERIC(18,2) AS till_recovered
+         FROM till_shortage_event_positions p
+         LEFT JOIN till_shortage_settlement_allocations a ON a.till_balance_id=p.till_balance_id
+         LEFT JOIN branch_shortage_payments bsp ON bsp.id=a.payment_id AND bsp.payment_date <= $2
+         WHERE p.till_id=$1 AND p.business_date <= $2
+         GROUP BY p.till_balance_id,p.shortage
+       ), reassigned_payments AS (
+         SELECT COALESCE(SUM(paid.amount),0)::NUMERIC(18,2) AS amount
+         FROM branch_shortage_responsibilities r
+         JOIN (SELECT DISTINCT responsibility_id FROM branch_shortage_responsibility_allocations) allocated
+           ON allocated.responsibility_id=r.id
+         LEFT JOIN LATERAL (
+           SELECT SUM(rp.amount)::NUMERIC(18,2) AS amount
+           FROM branch_shortage_responsibility_payments rp
+           WHERE rp.responsibility_id=r.id AND rp.payment_date <= $2
+         ) paid ON TRUE
+         WHERE r.till_id=$1 AND r.responsibility_date <= $2
+       ), separate_responsibilities AS (
+         SELECT COALESCE(SUM(GREATEST(r.amount-COALESCE(paid.amount,0),0)),0)::NUMERIC(18,2) AS outstanding
+         FROM branch_shortage_responsibilities r
+         LEFT JOIN LATERAL (
+           SELECT SUM(rp.amount)::NUMERIC(18,2) AS amount
+           FROM branch_shortage_responsibility_payments rp
+           WHERE rp.responsibility_id=r.id AND rp.payment_date <= $2
+         ) paid ON TRUE
+         WHERE r.till_id=$1 AND r.till_balance_id IS NULL AND r.responsibility_date <= $2
+           AND NOT EXISTS (
+             SELECT 1 FROM branch_shortage_responsibility_allocations ra WHERE ra.responsibility_id=r.id
+           )
+       )
+       SELECT (GREATEST(COALESCE(SUM(GREATEST(shortage-till_recovered,0)),0)
+                        - (SELECT amount FROM reassigned_payments),0)
+               + (SELECT outstanding FROM separate_responsibilities))::NUMERIC(18,2) AS outstanding
+       FROM till_events`,
+      [tillId,businessDate]
+    );
+    const previousOutstanding = Number(outstandingResult.rows[0]?.outstanding || 0);
+    const shortageEventAmount = Number(Math.max(currentShortage-previousOutstanding,0).toFixed(2));
 
     // Keep excess handling unchanged for now. Excess does not participate in
     // the shortage/recovery event ledger.
@@ -325,9 +366,7 @@ export async function createTillBalance(req, res, next) {
       shortageEvent: {
         newShortage: shortageEventAmount,
         observedShortage: currentShortage,
-        // Independent shortage events no longer derive from a previous shortage.
-        // Keep the response field for compatibility without reintroducing the old subtraction model.
-        previousShortage: null,
+        previousShortage: previousOutstanding,
       },
       excessEvent: {
         newExcess: excessEventAmount,
@@ -385,6 +424,9 @@ export async function getTillShortagePosition(req, res, next) {
                 p.business_date::text AS business_date,
                 p.shortage,
                 p.observed_shortage,
+                COALESCE((SELECT SUM(a.amount) FROM branch_shortage_responsibility_allocations a
+                          JOIN branch_shortage_responsibilities r ON r.id=a.responsibility_id
+                          WHERE a.till_balance_id=p.till_balance_id AND r.responsibility_date <= $2),0)::NUMERIC(18,2) AS reassigned,
                 COALESCE(SUM(a.amount) FILTER (WHERE bsp.payment_date <= $2),0)::NUMERIC(18,2) AS recovered
          FROM till_shortage_event_positions p
          LEFT JOIN till_shortage_settlement_allocations a
@@ -396,8 +438,8 @@ export async function getTillShortagePosition(req, res, next) {
          GROUP BY p.till_balance_id,p.till_id,p.employee_id,p.employee_name,p.till_name,p.business_date,p.shortage,p.observed_shortage
        )
        SELECT till_balance_id, employee_id, employee_name, till_name, business_date,
-              shortage, observed_shortage, recovered,
-              GREATEST(shortage-recovered,0)::NUMERIC(18,2) AS outstanding
+              GREATEST(shortage-reassigned,0)::NUMERIC(18,2) AS shortage, observed_shortage, recovered,
+              GREATEST(shortage-reassigned-recovered,0)::NUMERIC(18,2) AS outstanding
        FROM event_positions
        ORDER BY business_date DESC, till_balance_id DESC`,
       [tillId, date]
@@ -525,7 +567,7 @@ export async function recordTillShortagePayment(req, res, next) {
       throw error;
     }
     const event = eventResult.rows[0];
-    const eventBusinessDate = String(event.business_date).slice(0, 10);
+    const eventBusinessDate = databaseDate(event.business_date);
     // Settlement may happen later on the same business date or on any later
     // business date. A settlement is rejected only when its business date
     // precedes the shortage event's business date. The actual created_at
@@ -546,7 +588,15 @@ export async function recordTillShortagePayment(req, res, next) {
       [tillBalanceId, paymentDate]
     );
     const recovered = Number(allocationResult.rows[0]?.recovered || 0);
-    const outstanding = Math.max(Number(event.shortage) - recovered, 0);
+    const reassignedResult = await client.query(
+       `SELECT COALESCE(SUM(a.amount),0)::NUMERIC(18,2) AS amount
+       FROM branch_shortage_responsibility_allocations a
+       JOIN branch_shortage_responsibilities r ON r.id=a.responsibility_id
+       WHERE a.till_balance_id=$1 AND r.responsibility_date <= $2`,
+      [tillBalanceId,paymentDate]
+    );
+    const reassigned = Number(reassignedResult.rows[0]?.amount || 0);
+    const outstanding = Math.max(Number(event.shortage) - reassigned - recovered, 0);
 
     if (outstanding <= 0) {
       const error = new Error("The selected Till shortage event is already fully settled.");
@@ -666,7 +716,7 @@ export async function getTillBalanceDetails(req, res, next) {
     // JavaScript Date through toISOString() here because the server timezone
     // can shift a business date by one day (for example 2026-10-02 becomes
     // 2026-10-01 in UTC). Business dates are calendar dates, not timestamps.
-    const historicalDate = String(balanceResult.rows[0].business_date).slice(0, 10);
+    const historicalDate = databaseDate(balanceResult.rows[0].business_date);
 
     const transactionResult = await pool.query(
       `SELECT ttc.id, ttc.terminal_id, t.name AS terminal_name,
@@ -686,6 +736,9 @@ export async function getTillBalanceDetails(req, res, next) {
       `WITH event_positions AS (
          SELECT p.till_balance_id, p.employee_id, p.employee_name, p.business_date::text AS business_date,
                 p.shortage, p.observed_shortage,
+                COALESCE((SELECT SUM(a.amount) FROM branch_shortage_responsibility_allocations a
+                          JOIN branch_shortage_responsibilities r ON r.id=a.responsibility_id
+                          WHERE a.till_balance_id=p.till_balance_id AND r.responsibility_date <= $2),0)::NUMERIC(18,2) AS reassigned,
                 COALESCE(
                   SUM(a.amount) FILTER (WHERE bsp.payment_date <= $2),
                   0
@@ -701,8 +754,8 @@ export async function getTillBalanceDetails(req, res, next) {
                   p.shortage, p.observed_shortage
        )
        SELECT till_balance_id, employee_id, employee_name, business_date,
-              shortage, observed_shortage, recovered,
-              GREATEST(shortage - recovered, 0)::NUMERIC(18,2) AS outstanding
+              GREATEST(shortage-reassigned,0)::NUMERIC(18,2) AS shortage, observed_shortage, recovered,
+              GREATEST(shortage-reassigned-recovered,0)::NUMERIC(18,2) AS outstanding
        FROM event_positions
        ORDER BY business_date DESC, till_balance_id DESC`,
       [balanceResult.rows[0].till_id, historicalDate]

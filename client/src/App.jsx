@@ -2,7 +2,68 @@ import { useEffect, useState } from "react";
 import "./supervisor-branch-lock.css";
 import SupervisorDailyInputs from "./components/SupervisorDailyInputs";
 import "./supervisor-daily-inputs.css";
-import TerminalManagement from "./components/TerminalManagement"; import TillBalancing from "./components/TillBalancing"; import GeneralShopStatus from "./components/GeneralShopStatus"; import BranchStatus from "./components/BranchStatus"; import CashBook from "./components/CashBook"; import MasterData from "./components/MasterData"; import UserManagement from "./components/UserManagement"; import Login from "./components/Login"; import ChangePassword from "./components/ChangePassword"; import { getApiHealth,getCurrentUser,logout } from "./services/api";
-function App(){const [user,setUser]=useState(null);const [loading,setLoading]=useState(true);const [page,setPage]=useState("balancing");const [apiStatus,setApiStatus]=useState("Checking...");
-useEffect(()=>{getApiHealth().then(()=>setApiStatus("Connected")).catch(()=>setApiStatus("Not connected"));const token=localStorage.getItem("authToken");if(!token){setLoading(false);return;}getCurrentUser().then(d=>setUser(d.user)).catch(()=>localStorage.removeItem("authToken")).finally(()=>setLoading(false));},[]);
-if(loading)return <main className="auth-page"><div className="auth-card"><h1>Loading…</h1></div></main>; if(!user)return <Login onLogin={setUser}/>; if(user.must_change_password)return <ChangePassword onDone={()=>setUser({...user,must_change_password:false})}/>; const manager=user.role==="MANAGER"; const supervisor=user.role==="SUPERVISOR"; const allowed=manager?[['master-data','Master Data'],['terminals','Terminal Management'],['balancing','Till Balancing'],['shop-status','General Shop Status'],['branch-status','Branch Status'],['daily-inputs','Supervisor Daily Inputs'],['cash-book','Cash Book'],['users','User Management']]:supervisor?[['balancing','Till Balancing'],['shop-status','General Shop Status'],['branch-status','Branch Status'],['daily-inputs','Supervisor Daily Inputs'],['cash-book','Cash Book']]:[['balancing','Till Balancing']]; if(!allowed.some(x=>x[0]===page))setPage(allowed[0][0]); const signOut=async()=>{try{await logout();}catch{}localStorage.removeItem("authToken");setUser(null);};return <><nav className="app-nav"><div className="app-nav-title">AirtelComm-Bal-System</div><div className="app-nav-links">{allowed.map(([id,label])=><button key={id} className={page===id?"active":""} onClick={()=>setPage(id)}>{label}</button>)}</div><div className="app-user"><strong>{user.username}</strong><span>{user.role==="MANAGER"?"Manager":user.role==="SUPERVISOR"?"Supervisor":user.branch_name||"Branch User"}</span></div><span className={`api-badge ${apiStatus==="Connected"?"connected":""}`}>{apiStatus}</span><button className="signout-button" onClick={signOut}>Sign out</button></nav>{page==="balancing"?<TillBalancing user={user}/>:page==="terminals"?<TerminalManagement/>:page==="shop-status"?<GeneralShopStatus user={user}/>:page==="branch-status"?<BranchStatus user={user}/>:page==="daily-inputs"?<SupervisorDailyInputs user={user}/>:page==="cash-book"?<CashBook user={user}/>:page==="users"?<UserManagement currentUser={user}/>:<MasterData/>}</>}; export default App;
+import TerminalManagement from "./components/TerminalManagement";
+import TillBalancing from "./components/TillBalancing";
+import GeneralShopStatus from "./components/GeneralShopStatus";
+import BranchStatus from "./components/BranchStatus";
+import BranchShortageCounter from "./components/BranchShortageCounter";
+import CashBook from "./components/CashBook";
+import MasterData from "./components/MasterData";
+import UserManagement from "./components/UserManagement";
+import Login from "./components/Login";
+import ChangePassword from "./components/ChangePassword";
+import { getApiHealth, getCurrentUser, logout } from "./services/api";
+
+function App() {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState("balancing");
+  const [apiStatus, setApiStatus] = useState("Checking...");
+
+  useEffect(() => {
+    getApiHealth().then(() => setApiStatus("Connected")).catch(() => setApiStatus("Not connected"));
+    const token = localStorage.getItem("authToken");
+    if (!token) { setLoading(false); return; }
+    getCurrentUser().then((data) => setUser(data.user)).catch(() => localStorage.removeItem("authToken")).finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <main className="auth-page"><div className="auth-card"><h1>Loading…</h1></div></main>;
+  if (!user) return <Login onLogin={setUser} />;
+  if (user.must_change_password) return <ChangePassword onDone={() => setUser({ ...user, must_change_password: false })} />;
+
+  const manager = user.role === "MANAGER";
+  const supervisor = user.role === "SUPERVISOR";
+  const allowed = manager
+    ? [["master-data", "Master Data"], ["terminals", "Terminal Management"], ["balancing", "Till Balancing"], ["shop-status", "General Shop Status"], ["branch-status", "Branch Status"], ["shortage-counter", "Shortage Counter"], ["daily-inputs", "Supervisor Daily Inputs"], ["cash-book", "Cash Book"], ["users", "User Management"]]
+    : supervisor
+      ? [["balancing", "Till Balancing"], ["shop-status", "General Shop Status"], ["branch-status", "Branch Status"], ["shortage-counter", "Shortage Counter"], ["daily-inputs", "Supervisor Daily Inputs"], ["cash-book", "Cash Book"]]
+      : [["balancing", "Till Balancing"]];
+
+  if (!allowed.some(([id]) => id === page)) setPage(allowed[0][0]);
+  const signOut = async () => {
+    try { await logout(); } catch {}
+    localStorage.removeItem("authToken");
+    setUser(null);
+  };
+
+  return <>
+    <nav className="app-nav">
+      <div className="app-nav-title">AirtelComm-Bal-System</div>
+      <div className="app-nav-links">{allowed.map(([id, label]) => <button key={id} className={page === id ? "active" : ""} onClick={() => setPage(id)}>{label}</button>)}</div>
+      <div className="app-user"><strong>{user.username}</strong><span>{manager ? "Manager" : supervisor ? "Supervisor" : user.branch_name || "Branch User"}</span></div>
+      <span className={`api-badge ${apiStatus === "Connected" ? "connected" : ""}`}>{apiStatus}</span>
+      <button className="signout-button" onClick={signOut}>Sign out</button>
+    </nav>
+    {page === "balancing" ? <TillBalancing user={user} />
+      : page === "terminals" ? <TerminalManagement />
+        : page === "shop-status" ? <GeneralShopStatus user={user} />
+          : page === "branch-status" ? <BranchStatus user={user} />
+            : page === "shortage-counter" ? <BranchShortageCounter user={user} />
+              : page === "daily-inputs" ? <SupervisorDailyInputs user={user} />
+                : page === "cash-book" ? <CashBook user={user} />
+                  : page === "users" ? <UserManagement currentUser={user} />
+                    : <MasterData />}
+  </>;
+}
+
+export default App;

@@ -107,6 +107,18 @@ export async function recordShortagePayment(branchId,employeeId,amount,paymentDa
   notifyBranchReportChanged({ branchId, businessDate: paymentDate, reason: "shortage-payment-recorded" });
   return result;
 }
+export function getBranchShortageEmployees(branchId) { return request(`/branch-shortages/employees?branchId=${encodeURIComponent(branchId)}`); }
+export function getAssignableTillShortages(branchId,businessDate) { const p=new URLSearchParams({branchId:String(branchId),businessDate}); return request(`/branch-shortages/assignable-till-events?${p.toString()}`); }
+export async function recordExternalShortageResponsibility(payload) {
+  const result = await request("/branch-shortages/responsibilities",{method:"POST",body:JSON.stringify(payload)});
+  notifyBranchReportChanged({ branchId: payload.branchId, businessDate: payload.responsibilityDate, reason: "external-shortage-recorded" });
+  return result;
+}
+export async function recordExternalShortagePayment(responsibilityId,payload) {
+  const result = await request(`/branch-shortages/responsibilities/${encodeURIComponent(responsibilityId)}/payments`,{method:"POST",body:JSON.stringify(payload)});
+  notifyBranchReportChanged({ branchId: payload.branchId, businessDate: result?.payment?.payment_date || payload.paymentDate, reason: "external-shortage-settled" });
+  return result;
+}
 export function getCashBook(branchId,businessDate) { const p=new URLSearchParams({branchId:String(branchId),businessDate}); return request(`/cash-book?${p.toString()}`); }
 export async function saveCashBookOpeningBalance(branchId,openingBalance) {
   const result = await request("/cash-book/opening-balance",{method:"PUT",body:JSON.stringify({branchId,openingBalance})});

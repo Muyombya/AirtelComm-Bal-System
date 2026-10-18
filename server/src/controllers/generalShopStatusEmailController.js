@@ -74,6 +74,7 @@ export async function emailGeneralShopStatus(req, res, next) {
   }
 }
 
+
 export async function generateGeneralShopStatusPdf(req, res, next) {
   try {
     const branchId = Number(req.query.branchId);

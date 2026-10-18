@@ -22,6 +22,15 @@ function businessDate(value) {
   return date;
 }
 
+function databaseDate(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
+  const raw = String(value ?? "").trim();
+  const datePrefix = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (datePrefix) return datePrefix[1];
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? raw : parsed.toISOString().slice(0, 10);
+}
+
 function count(value, label) {
   const n = Number(value);
   if (!Number.isInteger(n) || n < 0) {
@@ -102,16 +111,45 @@ async function getShortageSummary(client, branchId, date) {
               p.employee_name,
               p.till_name,
               p.business_date,
-              p.shortage
+              GREATEST(p.shortage-COALESCE(transferred.amount,0),0)::NUMERIC(18,2) AS shortage,
+              'till'::TEXT AS source
        FROM till_shortage_event_positions p
+       LEFT JOIN LATERAL (
+         SELECT COALESCE(SUM(a.amount),0)::NUMERIC(18,2) AS amount
+         FROM branch_shortage_responsibility_allocations a
+         JOIN branch_shortage_responsibilities r ON r.id=a.responsibility_id
+         WHERE a.till_balance_id=p.till_balance_id AND r.responsibility_date <= $2
+       ) transferred ON TRUE
        WHERE p.branch_id=$1
          AND p.business_date <= $2
+         AND p.shortage-COALESCE(transferred.amount,0) > 0
+       UNION ALL
+       SELECT r.id AS till_balance_id,
+              r.employee_id,
+              e.name AS employee_name,
+              'Outside Till' AS till_name,
+              r.responsibility_date AS business_date,
+              r.amount AS shortage,
+              'external'::TEXT AS source
+       FROM branch_shortage_responsibilities r
+       JOIN employees e ON e.id=r.employee_id
+       WHERE r.branch_id=$1
+         AND r.responsibility_date <= $2
+     ),
+     all_payments AS (
+       SELECT employee_id, amount, payment_date
+       FROM branch_shortage_payments
+       WHERE branch_id=$1 AND payment_date <= $2
+       UNION ALL
+       SELECT r.employee_id, p.amount, p.payment_date
+       FROM branch_shortage_responsibility_payments p
+       JOIN branch_shortage_responsibilities r ON r.id=p.responsibility_id
+       WHERE r.branch_id=$1 AND p.payment_date <= $2
      ),
      people AS (
        SELECT employee_id FROM shortage_events
        UNION
-       SELECT employee_id FROM branch_shortage_payments
-       WHERE branch_id=$1 AND payment_date <= $2
+       SELECT employee_id FROM all_payments
      ),
      shortage_totals AS (
        SELECT employee_id,
@@ -127,8 +165,7 @@ async function getShortageSummary(client, branchId, date) {
               COALESCE(SUM(amount) FILTER (WHERE payment_date < $2),0)::NUMERIC(18,2) AS payments_before,
               COALESCE(SUM(amount) FILTER (WHERE payment_date = $2),0)::NUMERIC(18,2) AS payments_today,
               COALESCE(SUM(amount),0)::NUMERIC(18,2) AS payments_to_date
-       FROM branch_shortage_payments
-       WHERE branch_id=$1 AND payment_date <= $2
+       FROM all_payments
        GROUP BY employee_id
      )
      SELECT p.employee_id,
@@ -164,6 +201,240 @@ async function getShortageSummary(client, branchId, date) {
     paymentsToday: Number(r.payments_today || 0),
     balance: Number(r.balance || 0),
   }));
+}
+
+export async function listBranchShortageEmployees(req, res, next) {
+  try {
+    const branchId = positiveId(req.query.branchId, "Branch ID");
+    const result = await pool.query(
+      `SELECT e.id,e.name
+       FROM branch_employees be JOIN employees e ON e.id=be.employee_id
+       WHERE be.branch_id=$1
+       UNION
+       SELECT e.id,e.name
+       FROM till_assignments ta JOIN tills t ON t.id=ta.till_id JOIN employees e ON e.id=ta.employee_id
+       WHERE t.branch_id=$1 AND ta.ended_at IS NULL
+       ORDER BY name,id`, [branchId]
+    );
+    res.json(result.rows.map((row) => ({ id: Number(row.id), name: row.name })));
+  } catch (e) { next(e); }
+}
+
+export async function listAssignableTillShortages(req, res, next) {
+  try {
+    const branchId = positiveId(req.query.branchId, "Branch ID");
+    const date = businessDate(req.query.businessDate || new Date().toISOString().slice(0, 10));
+    const result = await pool.query(
+      `SELECT p.till_balance_id,p.till_id,p.till_name,p.employee_id,p.employee_name,
+              p.business_date,p.shortage,p.recovered,
+              GREATEST(p.outstanding-COALESCE(SUM(a.amount) FILTER (WHERE r.responsibility_date <= $2),0),0)::NUMERIC(18,2) AS available
+       FROM till_shortage_event_positions p
+       LEFT JOIN branch_shortage_responsibility_allocations a ON a.till_balance_id=p.till_balance_id
+       LEFT JOIN branch_shortage_responsibilities r ON r.id=a.responsibility_id AND r.responsibility_date <= $2
+       WHERE p.branch_id=$1 AND p.business_date <= $2
+       GROUP BY p.till_balance_id,p.till_id,p.till_name,p.employee_id,p.employee_name,
+                p.business_date,p.shortage,p.recovered,p.outstanding
+       HAVING p.outstanding-COALESCE(SUM(a.amount) FILTER (WHERE r.responsibility_date <= $2),0)>0
+       ORDER BY p.business_date DESC,p.till_name,p.till_balance_id DESC`, [branchId,date]
+    );
+    res.json(result.rows.map((r) => ({
+      tillBalanceId:Number(r.till_balance_id),tillId:Number(r.till_id),tillName:r.till_name,
+      employeeId:Number(r.employee_id),employeeName:r.employee_name,
+      businessDate:String(r.business_date).slice(0,10),shortage:Number(r.shortage),
+      recovered:Number(r.recovered),available:Number(r.available),
+    })));
+  } catch (e) { next(e); }
+}
+
+export async function listAvailableBranchEmployees(req, res, next) {
+  try {
+    const branchId = positiveId(req.query.branchId, "Branch ID");
+    const result = await pool.query(
+      `SELECT e.id,e.name
+       FROM employees e
+       WHERE EXISTS (SELECT 1 FROM branches b WHERE b.id=$1)
+         AND NOT EXISTS (SELECT 1 FROM branch_employees be WHERE be.employee_id=e.id)
+         AND NOT EXISTS (
+           SELECT 1 FROM till_assignments ta JOIN tills t ON t.id=ta.till_id
+           WHERE ta.employee_id=e.id AND ta.ended_at IS NULL AND t.branch_id<>$1
+         )
+       ORDER BY e.name,e.id`, [branchId]
+    );
+    res.json(result.rows.map((row) => ({ id: Number(row.id), name: row.name })));
+  } catch (e) { next(e); }
+}
+
+export async function assignEmployeeToBranch(req, res, next) {
+  const client = await pool.connect();
+  try {
+    const branchId = positiveId(req.body.branchId, "Branch ID");
+    const employeeId = positiveId(req.body.employeeId, "Employee ID");
+    await client.query("BEGIN");
+    const branch = await client.query("SELECT id FROM branches WHERE id=$1 FOR UPDATE", [branchId]);
+    if (!branch.rowCount) { const e = new Error("Branch not found."); e.statusCode = 404; throw e; }
+    const employee = await client.query("SELECT id FROM employees WHERE id=$1 FOR UPDATE", [employeeId]);
+    if (!employee.rowCount) { const e = new Error("Employee not found."); e.statusCode = 404; throw e; }
+    const existing = await client.query(
+      `SELECT branch_id FROM branch_employees WHERE employee_id=$1 AND branch_id<>$2 LIMIT 1 FOR UPDATE`, [employeeId, branchId]
+    );
+    if (existing.rowCount) { const e = new Error("This worker is already assigned to another branch."); e.statusCode = 409; throw e; }
+    const otherTill = await client.query(
+      `SELECT 1 FROM till_assignments ta JOIN tills t ON t.id=ta.till_id
+       WHERE ta.employee_id=$1 AND ta.ended_at IS NULL AND t.branch_id<>$2 LIMIT 1`, [employeeId, branchId]
+    );
+    if (otherTill.rowCount) { const e = new Error("This worker has an active Till in another branch."); e.statusCode = 409; throw e; }
+    await client.query(
+      `INSERT INTO branch_employees(branch_id,employee_id) VALUES($1,$2)
+       ON CONFLICT (branch_id,employee_id) DO NOTHING`, [branchId, employeeId]
+    );
+    await client.query("COMMIT");
+    res.status(201).json({ message: "Worker assigned to the branch." });
+  } catch (e) { await client.query("ROLLBACK").catch(() => {}); next(e); }
+  finally { client.release(); }
+}
+
+export async function recordExternalShortageResponsibility(req, res, next) {
+  const client = await pool.connect();
+  try {
+    const branchId = positiveId(req.body.branchId, "Branch ID");
+    const employeeId = positiveId(req.body.employeeId, "Employee ID");
+    const tillId = positiveId(req.body.tillId, "Source Till ID");
+    const tillBalanceId = req.body.tillBalanceId ? positiveId(req.body.tillBalanceId, "Till shortage event") : null;
+    const responsibilityDate = businessDate(req.body.responsibilityDate || new Date().toISOString().slice(0, 10));
+    const responsibilityAmount = amount(req.body.amount, "Amount");
+    const note = String(req.body.note || "").trim();
+    if (!note) { const e = new Error("Enter a note explaining the outside-Till responsibility."); e.statusCode = 400; throw e; }
+
+    await client.query("BEGIN");
+    const branch = await client.query("SELECT id FROM branches WHERE id=$1 FOR UPDATE", [branchId]);
+    if (!branch.rowCount) { const e = new Error("Branch not found."); e.statusCode = 404; throw e; }
+    const till = await client.query("SELECT id FROM tills WHERE id=$1 AND branch_id=$2 FOR UPDATE", [tillId,branchId]);
+    if (!till.rowCount) { const e = new Error("Select a Till belonging to this branch."); e.statusCode = 400; throw e; }
+    const employee = await client.query(
+      `SELECT e.id FROM employees e
+       WHERE e.id=$1 AND (
+         EXISTS (SELECT 1 FROM branch_employees be WHERE be.branch_id=$2 AND be.employee_id=e.id)
+         OR EXISTS (SELECT 1 FROM till_assignments ta JOIN tills t ON t.id=ta.till_id
+                    WHERE ta.employee_id=e.id AND ta.ended_at IS NULL AND t.branch_id=$2)
+       )`, [employeeId, branchId]
+    );
+    if (!employee.rowCount) { const e = new Error("Select a worker assigned to this branch."); e.statusCode = 400; throw e; }
+    if (tillBalanceId) {
+      await client.query("SELECT id FROM till_balances WHERE id=$1 FOR UPDATE", [tillBalanceId]);
+      const event = await client.query(
+        `SELECT p.till_id,p.business_date,p.shortage,p.outstanding
+         FROM till_shortage_event_positions p WHERE p.till_balance_id=$1 AND p.branch_id=$2`,
+        [tillBalanceId,branchId]
+      );
+      if (!event.rowCount || Number(event.rows[0].till_id)!==tillId) { const e = new Error("The selected shortage event does not belong to the chosen branch Till."); e.statusCode = 400; throw e; }
+      if (responsibilityDate < databaseDate(event.rows[0].business_date)) { const e = new Error("Responsibility date cannot be earlier than the Till shortage."); e.statusCode = 400; throw e; }
+      const assigned = await client.query(
+        `SELECT COALESCE(SUM(a.amount),0)::NUMERIC(18,2) AS total
+         FROM branch_shortage_responsibility_allocations a
+         JOIN branch_shortage_responsibilities r ON r.id=a.responsibility_id
+         WHERE a.till_balance_id=$1 AND r.responsibility_date <= $2`, [tillBalanceId,responsibilityDate]
+      );
+      const available = Number(event.rows[0].outstanding)-Number(assigned.rows[0].total||0);
+      if (responsibilityAmount > available) { const e = new Error(`Amount exceeds the unassigned unpaid Till shortage of UGX ${Math.max(available,0).toLocaleString("en-UG")}.`); e.statusCode = 400; throw e; }
+    }
+    const transferMode = String(req.body.reassignExistingTillShortage || (tillBalanceId ? true : false)) === "true";
+    const allocations = [];
+    if (transferMode) {
+      const events = await client.query(
+        `SELECT p.till_balance_id,p.outstanding,
+                COALESCE(SUM(a.amount) FILTER (WHERE r.responsibility_date <= $2),0)::NUMERIC(18,2) AS assigned,
+                p.business_date
+         FROM till_shortage_event_positions p
+         LEFT JOIN branch_shortage_responsibility_allocations a ON a.till_balance_id=p.till_balance_id
+         LEFT JOIN branch_shortage_responsibilities r ON r.id=a.responsibility_id
+         WHERE p.till_id=$1 AND p.business_date <= $2
+           AND ($3::BIGINT IS NULL OR p.till_balance_id=$3)
+         GROUP BY p.till_balance_id,p.outstanding,p.business_date
+         HAVING p.outstanding-COALESCE(SUM(a.amount) FILTER (WHERE r.responsibility_date <= $2),0)>0
+         ORDER BY p.business_date,p.till_balance_id`, [tillId,responsibilityDate,tillBalanceId]
+      );
+      let remaining = responsibilityAmount;
+      for (const event of events.rows) {
+        const available = Math.max(Number(event.outstanding)-Number(event.assigned||0),0);
+        if (!available) continue;
+        const allocatedAmount = Math.min(remaining,available);
+        allocations.push({ tillBalanceId:Number(event.till_balance_id),amount:allocatedAmount });
+        remaining = Number((remaining-allocatedAmount).toFixed(2));
+        if (!remaining) break;
+      }
+      if (remaining > 0) {
+        const message = tillBalanceId
+          ? "The selected Till event does not have enough unassigned outstanding shortage."
+          : "The amount exceeds the source Till's unassigned outstanding shortage.";
+        const e = new Error(message); e.statusCode = 400; throw e;
+      }
+    }
+
+    const inserted = await client.query(
+      `INSERT INTO branch_shortage_responsibilities(branch_id,employee_id,till_id,till_balance_id,amount,responsibility_date,note,created_by)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+       RETURNING id,branch_id,employee_id,till_id,till_balance_id,amount,responsibility_date,note,created_at`,
+      [branchId, employeeId, tillId, tillBalanceId, responsibilityAmount, responsibilityDate, note, req.user?.id || null]
+    );
+    for (const allocation of allocations) {
+      await client.query(
+        `INSERT INTO branch_shortage_responsibility_allocations(responsibility_id,till_balance_id,amount)
+         VALUES($1,$2,$3)`, [inserted.rows[0].id,allocation.tillBalanceId,allocation.amount]
+      );
+    }
+    await client.query("COMMIT");
+    res.status(201).json({ message: "Outside-Till responsibility recorded.", responsibility: inserted.rows[0] });
+  } catch (e) { await client.query("ROLLBACK").catch(() => {}); next(e); }
+  finally { client.release(); }
+}
+
+export async function recordExternalShortagePayment(req, res, next) {
+  const client = await pool.connect();
+  try {
+    const branchId = positiveId(req.body.branchId, "Branch ID");
+    const responsibilityId = positiveId(req.params.responsibilityId, "Responsibility ID");
+    const requestedPaymentDate = businessDate(req.body.paymentDate || new Date().toISOString().slice(0, 10));
+    const paymentAmount = amount(req.body.amount, "Payment amount");
+    const note = String(req.body.note || "").trim();
+
+    await client.query("BEGIN");
+    const responsibility = await client.query(
+      `SELECT r.id,r.branch_id,r.employee_id,r.amount,r.responsibility_date
+       FROM branch_shortage_responsibilities r
+       WHERE r.id=$1 AND r.branch_id=$2 FOR UPDATE`, [responsibilityId, branchId]
+    );
+    if (!responsibility.rowCount) { const e = new Error("Outside-Till responsibility not found in this branch."); e.statusCode = 404; throw e; }
+    const row = responsibility.rows[0];
+    // A user may be viewing a date before the responsibility was recorded.
+    // Preserve chronological consistency by normalizing the settlement date
+    // forward to the responsibility date instead of rejecting the payment.
+    const responsibilityDate = databaseDate(row.responsibility_date);
+    const paymentDate = requestedPaymentDate < responsibilityDate ? responsibilityDate : requestedPaymentDate;
+    const paid = await client.query(
+      `SELECT COALESCE(SUM(amount),0)::NUMERIC(18,2) AS total
+       FROM branch_shortage_responsibility_payments
+       WHERE responsibility_id=$1`, [responsibilityId]
+    );
+    const balance = Number(row.amount) - Number(paid.rows[0].total || 0);
+    if (paymentAmount > balance) {
+      const e = new Error(`Payment exceeds the outstanding responsibility balance of UGX ${balance.toLocaleString("en-UG")}.`);
+      e.statusCode = 400;
+      throw e;
+    }
+    const inserted = await client.query(
+      `INSERT INTO branch_shortage_responsibility_payments(responsibility_id,amount,payment_date,note,created_by)
+       VALUES($1,$2,$3,$4,$5) RETURNING id,responsibility_id,amount,payment_date,note,created_at`,
+      [responsibilityId, paymentAmount, paymentDate, note || null, req.user?.id || null]
+    );
+    await client.query("COMMIT");
+    res.status(201).json({
+      message: paymentDate === requestedPaymentDate
+        ? "Outside-Till shortage settlement recorded."
+        : `Settlement recorded on ${paymentDate}, the responsibility date.`,
+      payment: inserted.rows[0],
+    });
+  } catch (e) { await client.query("ROLLBACK").catch(() => {}); next(e); }
+  finally { client.release(); }
 }
 
 export async function getGeneralShopStatus(req, res, next) {
@@ -236,6 +507,30 @@ export async function getGeneralShopStatus(req, res, next) {
        WHERE bsp.branch_id=$1 AND bsp.payment_date <= $2
        ORDER BY bsp.payment_date DESC, bsp.id DESC
        LIMIT 100`, [branchId,date]
+    );
+    const externalShortages = await pool.query(
+      `SELECT r.id,r.employee_id,e.name AS employee_name,r.till_id,t.name AS till_name,
+              r.till_balance_id,source.source_attendants,r.amount,r.responsibility_date,r.note,
+              COALESCE(SUM(p.amount),0)::NUMERIC(18,2) AS paid_to_date,
+              COALESCE(SUM(p.amount) FILTER (WHERE p.payment_date=$2),0)::NUMERIC(18,2) AS paid_today,
+              GREATEST(r.amount-COALESCE(SUM(p.amount),0),0)::NUMERIC(18,2) AS balance
+       FROM branch_shortage_responsibilities r
+       JOIN employees e ON e.id=r.employee_id
+       LEFT JOIN tills t ON t.id=r.till_id
+       LEFT JOIN LATERAL (
+         SELECT STRING_AGG(DISTINCT source_employee.name, ', ' ORDER BY source_employee.name) AS source_attendants
+         FROM branch_shortage_responsibility_allocations allocation
+         JOIN till_balances source_balance ON source_balance.id=allocation.till_balance_id
+         JOIN employees source_employee ON source_employee.id=source_balance.employee_id
+         WHERE allocation.responsibility_id=r.id
+       ) source ON TRUE
+       LEFT JOIN branch_shortage_responsibility_payments p
+         ON p.responsibility_id=r.id AND p.payment_date <= $2
+       WHERE r.branch_id=$1 AND r.responsibility_date <= $2
+       GROUP BY r.id,e.id,e.name,t.name,source.source_attendants
+       HAVING r.amount-COALESCE(SUM(p.amount),0)>0
+          OR COALESCE(SUM(p.amount) FILTER (WHERE p.payment_date=$2),0)>0
+       ORDER BY r.responsibility_date DESC,r.id DESC`, [branchId,date]
     );
     // Cash Book Position must mirror the Cash Book module exactly.
     // cash_book_accounts.opening_balance is the branch's original/base opening
@@ -459,6 +754,7 @@ export async function getGeneralShopStatus(req, res, next) {
       },
       shortageCounter: shortageRows,
       shortagePayments: shortagePayments.rows.map(r => ({ id:Number(r.id), tillId:r.till_id == null ? null : Number(r.till_id), tillName:r.till_name || "", employeeId:Number(r.employee_id), employeeName:r.employee_name, amount:Number(r.amount), paymentDate:r.payment_date, note:r.note || "", createdAt:r.created_at })),
+      externalShortages: externalShortages.rows.map(r => ({ id:Number(r.id), employeeId:Number(r.employee_id), employeeName:r.employee_name, tillId:r.till_id?Number(r.till_id):null, tillName:r.till_name || "", sourceAttendant:r.source_attendants || "", tillBalanceId:r.till_balance_id?Number(r.till_balance_id):null, amount:Number(r.amount), responsibilityDate:r.responsibility_date, note:r.note || "", paidToDate:Number(r.paid_to_date || 0), paidToday:Number(r.paid_today || 0), balance:Number(r.balance || 0) })),
       totals:{branchOperatingCapital,totalCash,totalFloat,branchCapital,difference,totalShortageBalance,totalShortageAdded,totalShortagePaid,effectiveWorkingCapital,adjustedBranchCapital,adjustedDifference,status,adjustedStatus},
       balancedTillCount:balances.rows.length,totalTillCount:tills.rows.length,history:history.rows
     });

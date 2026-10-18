@@ -86,3 +86,41 @@ body.branch-status-fit-active .app-nav{visibility:hidden}
 .branch-status-fit-share{position:fixed;z-index:10001;top:5px;left:6px;min-height:32px;padding:5px 10px;border:0;border-radius:7px;background:#17663a;color:#fff;font-weight:700;cursor:pointer;box-shadow:0 2px 8px #102c4a40}
 @media(max-width:650px){.branch-status-expenses-heading{padding:2px 0;font-size:6px}.branch-status-fit-exit{top:5px;right:5px;min-height:30px;padding:5px 9px;font-size:12px}}
 @media print{.branch-status-fit-share{display:none!important}}
+
+/* Keep report data at the same size as the capital metric values. */
+.branch-status-report{--branch-status-figure-size:12px}
+.branch-status-group-columns,.branch-status-group-row,.branch-status-group-total,
+.branch-status-group-row>strong,.branch-status-group-total>strong,
+.branch-status-row,.branch-status-row strong,
+.branch-status-shortage-head,.branch-status-shortage-row,.branch-status-shortage-row strong,
+.branch-status-extra-info .branch-status-reason,.branch-status-accessories-info,
+.branch-status-expenses-heading{font-size:var(--branch-status-figure-size)}
+.branch-status-consolidated-totals>div,.branch-status-consolidated-totals strong{font-size:var(--branch-status-figure-size)}
+@media(max-width:650px){
+  .branch-status-report{--branch-status-figure-size:8px}
+  .branch-status-group-columns,.branch-status-group-row,.branch-status-group-total,
+  .branch-status-group-row>strong,.branch-status-group-total>strong,
+  .branch-status-row,.branch-status-row strong,
+  .branch-status-shortage-head,.branch-status-shortage-row,.branch-status-shortage-row strong,
+  .branch-status-shortage-row>span,
+  .branch-status-extra-info .branch-status-reason,.branch-status-accessories-info,
+  .branch-status-accessories-info span,.branch-status-accessories-info strong,.branch-status-accessories-info span small,
+  .branch-status-expenses-heading{font-size:var(--branch-status-figure-size)}
+  .branch-status-consolidated-totals>div,.branch-status-consolidated-totals strong{font-size:var(--branch-status-figure-size)}
+}
+
+/* Shortage columns are narrower, so keep their figures compact and bold. */
+.branch-status-shortage-card .branch-status-shortage-head,
+.branch-status-shortage-card .branch-status-shortage-row,
+.branch-status-shortage-card .branch-status-shortage-row>span,
+.branch-status-shortage-card .branch-status-shortage-row>strong{font-size:9px;font-weight:700}
+.branch-status-shortage-card .branch-status-shortage-head{font-weight:800}
+.branch-status-shortage-card .branch-status-shortage-row.total,
+.branch-status-shortage-card .branch-status-shortage-row.total>strong{font-weight:800}
+@media(max-width:650px){
+  .branch-status-shortage-card .branch-status-shortage-head,
+  .branch-status-shortage-card .branch-status-shortage-row,
+  .branch-status-shortage-card .branch-status-shortage-row>span,
+  .branch-status-shortage-card .branch-status-shortage-row>strong{font-size:7px}
+  .branch-status-shortage-card .branch-status-shortage-head{font-weight:800}
+}

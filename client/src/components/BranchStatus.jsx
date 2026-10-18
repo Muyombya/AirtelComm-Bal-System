@@ -53,9 +53,9 @@ function createBranchStatusSvg({ branchName, date, status, groups, totals, trans
   const mobileRows = groups.mobile || [];
   const bankRows = groups.banks || [];
   const expenses = cashBook.expenses || [];
-  const shortageRows = shortages || [];
+  const shortageRows = (shortages || []).filter((item) => Number(item.balance ?? 0) > 0);
   const maxProviderRows = Math.max(mobileRows.length, bankRows.length, 1);
-  const providerHeight = 50 + maxProviderRows * 13;
+  const providerHeight = 53 + maxProviderRows * 13;
   const cashbookHeight = Math.max(87, 75 + expenses.length * 12);
   const shortageHeight = 18 + 22 + Math.max(shortageRows.length, 1) * 13 + 13;
   const bottomHeight = Math.max(cashbookHeight, shortageHeight);
@@ -64,6 +64,8 @@ function createBranchStatusSvg({ branchName, date, status, groups, totals, trans
   const rect = (x, y, w, h, fill, stroke = "none", radius = 0) => shapes.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${radius}" fill="${fill}" stroke="${stroke}"/>`);
   const line = (x1, y1, x2, y2, color = "#d6e0e9", strokeWidth = 0.6) => shapes.push(`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="${strokeWidth}"/>`);
   const text = (x, y, value, { size = 7, color = "#172a40", weight = 400, anchor = "start" } = {}) => shapes.push(`<text x="${x}" y="${y}" font-family="Arial,Helvetica,sans-serif" font-size="${size}" font-weight="${weight}" fill="${color}" text-anchor="${anchor}">${escapeSvg(value)}</text>`);
+  const font = { label: 7, body: 7, compact: 7, value: 7 };
+  const shortageFontSize = 6;
   const amountColor = (value, shortage = false) => Number(value) < 0 || shortage ? "#b42318" : "#172a40";
   const formatAmount = (value, currency = false) => `${currency ? "UGX " : ""}${Number(value || 0).toLocaleString("en-UG")}`;
   const fitted = (value, max = 22) => {
@@ -98,27 +100,28 @@ function createBranchStatusSvg({ branchName, date, status, groups, totals, trans
     rect(x, y, colWidth, 12, "#dce9f5", "#aebdcc");
     text(x + colWidth / 2, y + 8.5, group.label, { size: 6.5, weight: 800, anchor: "middle", color: "#24496d" });
     rect(x, y + 12, colWidth, 15, "#f7f9fb", "#d8e0e8");
-    text(itemStart, y + 22, "Item", { size: 5.5, weight: 800, color: "#63748a" });
-    text(right - 63, y + 22, "Closing Bal", { size: 5, weight: 800, color: "#63748a", anchor: "middle" });
-    text(right - 19, y + 22, "Tx", { size: 5.5, weight: 800, color: "#63748a", anchor: "middle" });
+    text(itemStart, y + 22, "Item", { size: font.label, weight: 800, color: "#63748a" });
+    text(right - 63, y + 22, "Closing Bal", { size: font.compact, weight: 800, color: "#63748a", anchor: "middle" });
+    text(right - 19, y + 22, "Tx", { size: font.label, weight: 800, color: "#63748a", anchor: "middle" });
     for (let rowIndex = 0; rowIndex < maxProviderRows; rowIndex += 1) {
-      const rowY = y + 31 + rowIndex * 13;
+      const rowY = y + 34 + rowIndex * 13;
       line(x, rowY + 4, right, rowY + 4);
       const item = group.rows[rowIndex];
       if (!item) continue;
-      text(itemStart, rowY, fitted(item.name, 20), { size: 6.5 });
-      text(balanceEdge, rowY, item.hasBalance ? formatAmount(item.amount) : "—", { size: 5.8, color: amountColor(item.amount), anchor: "end" });
-      text(transactionEdge, rowY, item.hasTransactions ? formatAmount(item.count) : "—", { size: 5.8, color: amountColor(item.count), anchor: "end" });
+      text(itemStart, rowY, fitted(item.name, 20), { size: font.body });
+      text(balanceEdge, rowY, item.hasBalance ? formatAmount(item.amount) : "—", { size: font.compact, color: amountColor(item.amount), anchor: "end" });
+      text(transactionEdge, rowY, item.hasTransactions ? formatAmount(item.count) : "—", { size: font.compact, color: amountColor(item.count), anchor: "end" });
     }
-    const totalY = y + 31 + maxProviderRows * 13;
+    const totalY = y + 34 + maxProviderRows * 13;
     rect(x, totalY - 9, colWidth, 13, "#f1f5f8", "#d8e0e8");
     const balanceTotal = group.rows.filter((item) => item.hasBalance).reduce((sum, item) => sum + Number(item.amount || 0), 0);
     const transactionTotal = group.rows.filter((item) => item.hasTransactions).reduce((sum, item) => sum + Number(item.count || 0), 0);
-    text(itemStart, totalY, "Total", { size: 6, weight: 800 });
-    text(balanceEdge, totalY, group.rows.some((item) => item.hasBalance) ? formatAmount(balanceTotal) : "—", { size: 5.7, weight: 800, color: amountColor(balanceTotal), anchor: "end" });
-    text(transactionEdge, totalY, group.rows.some((item) => item.hasTransactions) ? formatAmount(transactionTotal) : "—", { size: 5.7, weight: 800, color: amountColor(transactionTotal), anchor: "end" });
+    text(itemStart, totalY, "Total", { size: font.label, weight: 800 });
+    text(balanceEdge, totalY, group.rows.some((item) => item.hasBalance) ? formatAmount(balanceTotal) : "—", { size: font.compact, weight: 800, color: amountColor(balanceTotal), anchor: "end" });
+    text(transactionEdge, totalY, group.rows.some((item) => item.hasTransactions) ? formatAmount(transactionTotal) : "—", { size: font.compact, weight: 800, color: amountColor(transactionTotal), anchor: "end" });
   });
-  y += 35 + maxProviderRows * 13;
+  line(centerX, y, centerX, y + 38 + maxProviderRows * 13, "#8fa5bb", 1);
+  y += 38 + maxProviderRows * 13;
   rect(margin + 1, y, innerWidth - 2, 14, "#dce9f5", "#aebdcc");
   text(margin + 8, y + 9.5, "TOTAL FLOAT", { size: 6, weight: 800, color: "#24496d" });
   text(margin + colWidth - 6, y + 9.5, formatAmount(totals.totalFloat, true), { size: 7, weight: 800, anchor: "end" });
@@ -137,14 +140,14 @@ function createBranchStatusSvg({ branchName, date, status, groups, totals, trans
     const x = margin + 1 + (index % 2) * colWidth;
     const rowY = y + Math.floor(index / 2) * 20;
     rect(x, rowY, colWidth - 1, 19, label === "SHORTAGE" ? "#fff0ed" : "#f0f5f9", "#d8e0e8", 3);
-    text(x + 5, rowY + 7, label, { size: 5.5, weight: 800, color: "#63748a" });
-    text(x + 5, rowY + 15.5, formatAmount(value, true), { size: 7, weight: 800, color: amountColor(value, label === "SHORTAGE") });
+    text(x + 5, rowY + 7, label, { size: font.label, weight: 800, color: "#63748a" });
+    text(x + 5, rowY + 15.5, formatAmount(value, true), { size: font.value, weight: 800, color: amountColor(value, label === "SHORTAGE") });
   });
   y += 43;
   rect(margin + 1, y, innerWidth - 2, 19, "#f7f9fb", "#d8e0e8", 3);
   text(margin + 6, y + 11.5, `REASON  ${fitted(reason || "—", 34)}`, { size: 6.2, color: "#334155" });
   line(centerX, y + 3, centerX, y + 16);
-  text(centerX + 6, y + 8, "ACCESSORIES SALES", { size: 5.3, weight: 800, color: "#63748a" });
+  text(centerX + 6, y + 8, "ACCESSORIES SALES", { size: font.label, weight: 800, color: "#63748a" });
   text(centerX + 6, y + 15, formatAmount(accessoriesCount), { size: 7, weight: 800, color: amountColor(accessoriesCount) });
 
   y += 24;
@@ -159,21 +162,21 @@ function createBranchStatusSvg({ branchName, date, status, groups, totals, trans
     [shortageX, "BRANCH SHORTAGE COUNTER"],
   ].forEach(([x, heading]) => {
     rect(x, bottomTop, cardWidth, 14, "#eaf1f7", "none", 4);
-    text(x + cardWidth / 2, bottomTop + 9.5, heading, { size: heading.length > 15 ? 5.4 : 6.5, weight: 900, color: "#24496d", anchor: "middle" });
+    text(x + cardWidth / 2, bottomTop + 9.5, heading, { size: 6.5, weight: 900, color: "#24496d", anchor: "middle" });
   });
 
   let cashY = bottomTop + 14;
-  text(cashX + cardWidth / 2, cashY + 8, "EXPENSES", { size: 5.6, weight: 800, color: "#63748a", anchor: "middle" });
+  text(cashX + cardWidth / 2, cashY + 8, "EXPENSES", { size: font.label, weight: 800, color: "#63748a", anchor: "middle" });
   line(cashX + 3, cashY + 10, cashX + cardWidth - 3, cashY + 10);
   cashY += 18;
   expenses.forEach((expense) => {
-    text(cashX + 4, cashY + 6, fitted(expense.description || expense.category || "Expense", 18), { size: 5.8, weight: 600 });
-    text(cashX + cardWidth - 4, cashY + 6, formatAmount(expense.amount, true), { size: 5.6, weight: 700, color: amountColor(expense.amount), anchor: "end" });
+    text(cashX + 4, cashY + 6, fitted(expense.description || expense.category || "Expense", 18), { size: font.body, weight: 600 });
+    text(cashX + cardWidth - 4, cashY + 6, formatAmount(expense.amount, true), { size: font.compact, weight: 700, color: amountColor(expense.amount), anchor: "end" });
     line(cashX + 3, cashY + 9, cashX + cardWidth - 3, cashY + 9);
     cashY += 12;
   });
   if (!expenses.length) {
-    text(cashX + 5, cashY + 6, "No expenses recorded", { size: 5.8, color: "#68788a" });
+    text(cashX + 5, cashY + 6, "No expenses recorded", { size: font.body, color: "#68788a" });
     cashY += 12;
   }
   [
@@ -182,8 +185,8 @@ function createBranchStatusSvg({ branchName, date, status, groups, totals, trans
     ["Opening Balance", cashBook.openingBalance, false],
     ["Closing Balance", cashBook.closingBalance, true],
   ].forEach(([label, value, bold]) => {
-    text(cashX + 4, cashY + 7, label, { size: 5.6, weight: bold ? 800 : 500 });
-    text(cashX + cardWidth - 4, cashY + 7, formatAmount(value, true), { size: 5.5, weight: bold ? 800 : 500, color: amountColor(value), anchor: "end" });
+    text(cashX + 4, cashY + 7, label, { size: font.label, weight: bold ? 800 : 500 });
+    text(cashX + cardWidth - 4, cashY + 7, formatAmount(value, true), { size: font.compact, weight: bold ? 800 : 500, color: amountColor(value), anchor: "end" });
     cashY += 11;
   });
 
@@ -192,17 +195,17 @@ function createBranchStatusSvg({ branchName, date, status, groups, totals, trans
   const owedX = shortageX + 71;
   const paidX = shortageX + 106;
   const balanceX = shortageX + cardWidth - 3;
-  text(nameX, shortageY + 10, "NAME", { size: 5, weight: 800, color: "#63748a" });
-  text(owedX, shortageY + 10, "OWED", { size: 5, weight: 800, color: "#63748a", anchor: "middle" });
-  text(paidX, shortageY + 10, "PAID", { size: 5, weight: 800, color: "#63748a", anchor: "middle" });
-  text(balanceX, shortageY + 10, "BALANCE", { size: 5, weight: 800, color: "#63748a", anchor: "end" });
+  text(nameX, shortageY + 10, "NAME", { size: shortageFontSize, weight: 800, color: "#63748a" });
+  text(owedX, shortageY + 10, "OWED", { size: shortageFontSize, weight: 800, color: "#63748a", anchor: "middle" });
+  text(paidX, shortageY + 10, "PAID", { size: shortageFontSize, weight: 800, color: "#63748a", anchor: "middle" });
+  text(balanceX, shortageY + 10, "BALANCE", { size: shortageFontSize, weight: 800, color: "#63748a", anchor: "end" });
   line(shortageX + 3, shortageY + 13, shortageX + cardWidth - 3, shortageY + 13);
   shortageY += 19;
   shortageRows.forEach((item) => {
-    text(nameX, shortageY + 7, fitted(item.employee_name || item.name || "—", 12), { size: 5.2 });
-    text(owedX, shortageY + 7, formatAmount(item.amountOwed ?? item.amount_owed), { size: 5, color: amountColor(item.amountOwed ?? item.amount_owed, true), anchor: "middle" });
-    text(paidX, shortageY + 7, formatAmount(item.paymentsToday ?? item.payments_today), { size: 5, anchor: "middle" });
-    text(balanceX, shortageY + 7, formatAmount(item.balance), { size: 5, color: amountColor(item.balance, true), anchor: "end" });
+    text(nameX, shortageY + 7, fitted(item.employee_name || item.name || "—", 12), { size: shortageFontSize, weight: 700 });
+    text(owedX, shortageY + 7, formatAmount(item.amountOwed ?? item.amount_owed), { size: shortageFontSize, weight: 700, color: amountColor(item.amountOwed ?? item.amount_owed, true), anchor: "middle" });
+    text(paidX, shortageY + 7, formatAmount(item.paymentsToday ?? item.payments_today), { size: shortageFontSize, weight: 700, anchor: "middle" });
+    text(balanceX, shortageY + 7, formatAmount(item.balance), { size: shortageFontSize, weight: 700, color: amountColor(item.balance, true), anchor: "end" });
     shortageY += 13;
   });
   if (!shortageRows.length) {
@@ -210,13 +213,14 @@ function createBranchStatusSvg({ branchName, date, status, groups, totals, trans
     shortageY += 13;
   }
   line(shortageX + 3, shortageY + 1, shortageX + cardWidth - 3, shortageY + 1, "#aebdcc", 0.8);
-  const totalOwed = shortageRows.reduce((sum, item) => sum + Number(item.amountOwed ?? item.amount_owed ?? 0), 0);
-  const totalPaid = shortageRows.reduce((sum, item) => sum + Number(item.paymentsToday ?? item.payments_today ?? 0), 0);
-  const totalBalance = totals.totalShortageBalance ?? shortageRows.reduce((sum, item) => sum + Number(item.balance || 0), 0);
-  text(nameX, shortageY + 8, "TOTAL", { size: 5.3, weight: 900 });
-  text(owedX, shortageY + 8, formatAmount(totalOwed), { size: 4.8, weight: 800, color: amountColor(totalOwed, true), anchor: "middle" });
-  text(paidX, shortageY + 8, formatAmount(totalPaid), { size: 4.8, weight: 800, anchor: "middle" });
-  text(balanceX, shortageY + 8, formatAmount(totalBalance), { size: 4.8, weight: 800, color: amountColor(totalBalance, true), anchor: "end" });
+  const totalBalance = Number(totals.totalShortageBalance ?? shortageRows.reduce((sum, item) => sum + Number(item.balance || 0), 0));
+  const totalPaid = Number(totals.totalShortagePaid ?? shortageRows.reduce((sum, item) => sum + Number(item.paymentsToday ?? item.payments_today ?? 0), 0));
+  const totalAdded = Number(totals.totalShortageAdded ?? shortageRows.reduce((sum, item) => sum + Number(item.newShortage ?? item.new_shortage ?? 0), 0));
+  const totalOwed = Math.max(totalBalance + totalPaid - totalAdded, 0);
+  text(nameX, shortageY + 8, "TOTAL", { size: shortageFontSize, weight: 900 });
+  text(owedX, shortageY + 8, formatAmount(totalOwed), { size: shortageFontSize, weight: 800, color: amountColor(totalOwed, true), anchor: "middle" });
+  text(paidX, shortageY + 8, formatAmount(totalPaid), { size: shortageFontSize, weight: 800, anchor: "middle" });
+  text(balanceX, shortageY + 8, formatAmount(totalBalance), { size: shortageFontSize, weight: 800, color: amountColor(totalBalance, true), anchor: "end" });
 
   y = bottomTop + bottomHeight;
   text(centerX, y + 9, "Figures consolidated across the branch for the selected date.", { size: 5.4, color: "#758397", anchor: "middle" });
@@ -410,7 +414,9 @@ export default function BranchStatus({ user }) {
 
   const totals = data?.totals || {};
   const cashBook = data?.cashBook || {};
-  const shortages = data?.shortageCounter || [];
+  // The report payload retains settled workers for daily accounting totals,
+  // but the Branch Shortage Counter itself only lists current debtors.
+  const shortages = (data?.shortageCounter || []).filter((item) => Number(item.balance ?? 0) > 0);
   const status = String(totals.status || "INCOMPLETE").toUpperCase();
   const branchName = data?.branch?.name || user?.branch_name || "Branch";
 
@@ -433,9 +439,8 @@ export default function BranchStatus({ user }) {
       });
       const safeBranch = branchName.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "") || "Branch";
       const file = new File([blob], `Branch-Status-${safeBranch}-${date}.png`, { type: "image/png" });
-      const title = `${branchName} Branch Status · ${date}`;
       if (navigator.share && navigator.canShare?.({ files: [file] })) {
-        await navigator.share({ files: [file], title, text: title });
+        await navigator.share({ files: [file] });
       } else {
         const imageUrl = URL.createObjectURL(blob);
         const link = document.createElement("a");
@@ -543,12 +548,12 @@ export default function BranchStatus({ user }) {
               <div className="branch-status-row total"><span>Closing Balance</span><strong className={figureTone(cashBook.closingBalance)}>{money(cashBook.closingBalance)}</strong></div>
             </div>
           </div>
-          <div className="branch-status-card">
+          <div className="branch-status-card branch-status-shortage-card">
             <h3>Branch Shortage Counter</h3>
             <div className="branch-status-shortage-head"><span>Name</span><span>Amount Owed</span><span>Paid Off</span><span>Balance</span></div>
             {(shortages || []).map((item) => <div className="branch-status-shortage-row" key={item.employeeId || item.employee_id}><span>{item.employee_name || item.name || "—"}</span><strong className={figureTone(item.amountOwed ?? item.amount_owed, "shortage-figure")}>{compactNumber(item.amountOwed ?? item.amount_owed)}</strong><strong className={figureTone(item.paymentsToday ?? item.payments_today)}>{compactNumber(item.paymentsToday ?? item.payments_today)}</strong><strong className={figureTone(item.balance, "shortage-figure")}>{compactNumber(item.balance)}</strong></div>)}
             {!shortages.length && <div className="branch-status-empty">No outstanding shortages</div>}
-            <div className="branch-status-shortage-row total"><span>Total</span><strong className="shortage-figure">{compactNumber(shortages.reduce((sum, item) => sum + Number(item.amountOwed ?? item.amount_owed ?? 0), 0))}</strong><strong>{compactNumber(shortages.reduce((sum, item) => sum + Number(item.paymentsToday ?? item.payments_today ?? 0), 0))}</strong><strong className="shortage-figure">{compactNumber(totals.totalShortageBalance ?? shortages.reduce((sum, item) => sum + Number(item.balance || 0), 0))}</strong></div>
+            <div className="branch-status-shortage-row total"><span>Total</span><strong className="shortage-figure">{compactNumber(Math.max(Number(totals.totalShortageBalance || 0) + Number(totals.totalShortagePaid || 0) - Number(totals.totalShortageAdded || 0), 0))}</strong><strong>{compactNumber(totals.totalShortagePaid ?? shortages.reduce((sum, item) => sum + Number(item.paymentsToday ?? item.payments_today ?? 0), 0))}</strong><strong className="shortage-figure">{compactNumber(totals.totalShortageBalance ?? shortages.reduce((sum, item) => sum + Number(item.balance || 0), 0))}</strong></div>
           </div>
         </section>
         <footer className="branch-status-foot">Figures are consolidated across the branch for the selected business date.</footer>
