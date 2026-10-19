@@ -117,6 +117,8 @@ body.branch-status-fit-active .app-nav{visibility:hidden}
 .branch-status-shortage-card .branch-status-shortage-head{font-weight:800}
 .branch-status-shortage-card .branch-status-shortage-row.total,
 .branch-status-shortage-card .branch-status-shortage-row.total>strong{font-weight:800}
+.branch-status-report{background:var(--branch-status-branch-tint,#fff)}
+.branch-status-report-head{background:var(--branch-status-branch-tint,#fff)}
 @media(max-width:650px){
   .branch-status-shortage-card .branch-status-shortage-head,
   .branch-status-shortage-card .branch-status-shortage-row,

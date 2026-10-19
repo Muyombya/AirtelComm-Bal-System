@@ -14,6 +14,15 @@ function providerGroup(name) {
     : "banks";
 }
 
+function branchReportTint(name) {
+  const normalized = String(name || "").trim().toLocaleLowerCase();
+  if (normalized.includes("namugongo")) return "#ffe599";
+  if (normalized.includes("naalya")) return "#efefef";
+  if (normalized.includes("kitende")) return "#9fc5e8";
+  if (normalized.includes("lubowa")) return "#f4cccc";
+  return "#ffffff";
+}
+
 function reportItemIdentity(name) {
   const label = String(name || "Other").trim();
   const normalized = label.toLocaleLowerCase();
@@ -53,7 +62,7 @@ function escapeSvg(value) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[character]);
 }
 
-function createBranchStatusSvg({ branchName, date, status, groups, totals, transactions, cashBook, reason, accessoriesCount, shortages }) {
+function createBranchStatusSvg({ branchName, branchTint, date, status, groups, totals, transactions, cashBook, reason, accessoriesCount, shortages }) {
   const width = 360;
   const margin = 7;
   const innerWidth = width - margin * 2;
@@ -82,7 +91,7 @@ function createBranchStatusSvg({ branchName, date, status, groups, totals, trans
   };
 
   rect(0, 0, width, height, "#edf2f7");
-  rect(margin, 5, innerWidth, height - 10, "#ffffff", "#cbd5df", 7);
+  rect(margin, 5, innerWidth, height - 10, branchTint || "#ffffff", "#cbd5df", 7);
   const centerX = width / 2;
   text(centerX, 22, branchName, { size: 14, weight: 800, anchor: "middle", color: "#173b64" });
   text(centerX, 32, `Branch Status · ${date}`, { size: 7, anchor: "middle", color: "#64748b" });
@@ -435,6 +444,7 @@ export default function BranchStatus({ user }) {
     try {
       const blob = await createBranchStatusImage({
         branchName,
+        branchTint: branchReportTint(branchName),
         date,
         status,
         groups: groupedItems,
@@ -492,7 +502,7 @@ export default function BranchStatus({ user }) {
         <button type="button" className="branch-status-fit-share" onClick={shareBranchStatusImage} disabled={sharingImage}>{sharingImage ? "Preparing…" : "Share report"}</button>
         <button type="button" className="branch-status-fit-exit" aria-label="Return to normal Branch Status view" onClick={() => setFitMode(false)}>← Back to report</button>
       </>}
-      {data && !loading && <article ref={reportRef} className="branch-status-report">
+      {data && !loading && <article ref={reportRef} className="branch-status-report" style={{ "--branch-status-branch-tint": branchReportTint(branchName) }}>
         <header className="branch-status-report-head">
           <div><h2>{branchName}</h2><p>Branch Status · {date}</p></div>
           <span className={`branch-status-badge ${status.toLowerCase()}`}>{status}</span>
