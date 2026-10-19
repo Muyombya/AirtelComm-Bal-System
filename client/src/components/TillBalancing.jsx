@@ -474,7 +474,6 @@ export default function TillBalancing({ user }) {
     <main className={`app-shell till-balancing-page ${recordedBalanceStatus ? `till-status-${recordedBalanceStatus.toLowerCase()}` : ""}`}>
       <header className="page-header">
         <div>
-          <div className="eyebrow">BUILD 003</div>
           <h1>Till Balancing</h1>
           <p>Count physical cash, capture current float positions, and compare Actual Till Capital with Operating Capital.</p>
         </div>

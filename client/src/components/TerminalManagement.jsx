@@ -228,7 +228,6 @@ export default function TerminalManagement() {
             <h1 className="mt-1 text-2xl font-bold tracking-tight">Terminal Management</h1>
             <p className="mt-1 text-sm text-slate-500">Register terminals to branches, manage Till assignments and control transfers.</p>
           </div>
-          <div className="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">Backend connected</div>
         </div>
       </header>
 

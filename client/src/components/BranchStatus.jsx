@@ -62,7 +62,7 @@ function escapeSvg(value) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[character]);
 }
 
-function createBranchStatusSvg({ branchName, branchTint, date, status, groups, totals, transactions, cashBook, reason, accessoriesCount, shortages }) {
+function createBranchStatusSvg({ branchName, branchTint, date, groups, totals, transactions, cashBook, reason, accessoriesCount, shortages }) {
   const width = 360;
   const margin = 7;
   const innerWidth = width - margin * 2;
@@ -95,10 +95,6 @@ function createBranchStatusSvg({ branchName, branchTint, date, status, groups, t
   const centerX = width / 2;
   text(centerX, 22, branchName, { size: 14, weight: 800, anchor: "middle", color: "#173b64" });
   text(centerX, 32, `Branch Status · ${date}`, { size: 7, anchor: "middle", color: "#64748b" });
-  const normalizedStatus = String(status || "INCOMPLETE").toUpperCase();
-  const statusColor = normalizedStatus === "SHORT" ? "#b42318" : normalizedStatus === "EXCESS" ? "#187443" : normalizedStatus === "BALANCED" ? "#187443" : "#8a5a00";
-  rect(width - 55, 11, 43, 14, normalizedStatus === "SHORT" ? "#fff0ed" : normalizedStatus === "EXCESS" || normalizedStatus === "BALANCED" ? "#e3f4eb" : "#fff2d6", "none", 7);
-  text(width - 33.5, 20, normalizedStatus, { size: 5.5, weight: 800, color: statusColor, anchor: "middle" });
   line(margin + 7, 38, width - margin - 7, 38, "#163d68", 1);
 
   let y = 43;
@@ -162,9 +158,10 @@ function createBranchStatusSvg({ branchName, branchTint, date, status, groups, t
   });
   y += 43;
   rect(margin + 1, y, innerWidth - 2, 19, "#f7f9fb", "#d8e0e8", 3);
-  text(margin + 6, y + 11.5, `REASON  ${fitted(reason || "—", 34)}`, { size: 6.2, color: "#334155" });
+  text(margin + 6, y + 8, "REASON:", { size: font.label, weight: 800, color: "#63748a" });
+  text(margin + 6, y + 15, fitted(reason || "—", 34), { size: 7, weight: 800, color: "#334155" });
   line(centerX, y + 3, centerX, y + 16);
-  text(centerX + 6, y + 8, "ACCESSORIES SALES", { size: font.label, weight: 800, color: "#63748a" });
+  text(centerX + 6, y + 8, "ACCESSORIES SALES:", { size: font.label, weight: 800, color: "#63748a" });
   text(centerX + 6, y + 15, formatAmount(accessoriesCount), { size: 7, weight: 800, color: amountColor(accessoriesCount) });
 
   y += 24;
@@ -434,7 +431,6 @@ export default function BranchStatus({ user }) {
   // The report payload retains settled workers for daily accounting totals,
   // but the Branch Shortage Counter itself only lists current debtors.
   const shortages = (data?.shortageCounter || []).filter((item) => Number(item.balance ?? 0) > 0);
-  const status = String(totals.status || "INCOMPLETE").toUpperCase();
   const branchName = data?.branch?.name || user?.branch_name || "Branch";
 
   const shareBranchStatusImage = async () => {
@@ -446,7 +442,6 @@ export default function BranchStatus({ user }) {
         branchName,
         branchTint: branchReportTint(branchName),
         date,
-        status,
         groups: groupedItems,
         totals,
         transactions,
@@ -505,7 +500,6 @@ export default function BranchStatus({ user }) {
       {data && !loading && <article ref={reportRef} className="branch-status-report" style={{ "--branch-status-branch-tint": branchReportTint(branchName) }}>
         <header className="branch-status-report-head">
           <div><h2>{branchName}</h2><p>Branch Status · {date}</p></div>
-          <span className={`branch-status-badge ${status.toLowerCase()}`}>{status}</span>
         </header>
 
         <section className="branch-status-consolidated">
@@ -548,8 +542,8 @@ export default function BranchStatus({ user }) {
           <div><span>Operating Capital</span><strong className={figureTone(totals.branchOperatingCapital)}>{money(totals.branchOperatingCapital)}</strong></div>
           <div className="branch-status-shortage-total"><span>Shortage</span><strong className={figureTone(totals.totalShortageBalance, "shortage-figure")}>{money(totals.totalShortageBalance)}</strong></div>
           <div className="branch-status-extra-info">
-            <div className="branch-status-reason"><span>Reason</span><strong>{data.reason || "—"}</strong></div>
-            <div className="branch-status-accessories-info"><span>Accessories Sales</span><strong className={figureTone(data.accessoriesCount)}>{compactNumber(data.accessoriesCount)}</strong></div>
+            <div className="branch-status-reason"><span>Reason:</span><strong>{data.reason || "—"}</strong></div>
+            <div className="branch-status-accessories-info"><span>Accessories Sales:</span><strong className={figureTone(data.accessoriesCount)}>{compactNumber(data.accessoriesCount)}</strong></div>
           </div>
         </section>
 
