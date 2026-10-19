@@ -36,10 +36,10 @@ function App() {
   const allowed = manager
     ? [["master-data", "Master Data"], ["terminals", "Terminal Management"], ["balancing", "Till Balancing"], ["shop-status", "General Shop Status"], ["branch-status", "Branch Status"], ["shortage-counter", "Shortage Counter"], ["daily-inputs", "Supervisor Daily Inputs"], ["cash-book", "Cash Book"], ["users", "User Management"]]
     : supervisor
-      ? [["balancing", "Till Balancing"], ["shop-status", "General Shop Status"], ["branch-status", "Branch Status"], ["shortage-counter", "Shortage Counter"], ["daily-inputs", "Supervisor Daily Inputs"], ["cash-book", "Cash Book"]]
+      ? [["balancing", "Till Balancing"], ["branch-status", "Branch Status"], ["shortage-counter", "Shortage Counter"], ["daily-inputs", "Supervisor Daily Inputs"], ["cash-book", "Cash Book"]]
       : [["balancing", "Till Balancing"]];
 
-  if (!allowed.some(([id]) => id === page)) setPage(allowed[0][0]);
+  const activePage = allowed.some(([id]) => id === page) ? page : allowed[0][0];
   const signOut = async () => {
     try { await logout(); } catch {}
     localStorage.removeItem("authToken");
@@ -49,19 +49,19 @@ function App() {
   return <>
     <nav className="app-nav">
       <div className="app-nav-title">AirtelComm-Bal-System</div>
-      <div className="app-nav-links">{allowed.map(([id, label]) => <button key={id} className={page === id ? "active" : ""} onClick={() => setPage(id)}>{label}</button>)}</div>
+      <div className="app-nav-links">{allowed.map(([id, label]) => <button key={id} className={activePage === id ? "active" : ""} onClick={() => setPage(id)}>{label}</button>)}</div>
       <div className="app-user"><strong>{user.username}</strong><span>{manager ? "Manager" : supervisor ? "Supervisor" : user.branch_name || "Branch User"}</span></div>
       <span className={`api-badge ${apiStatus === "Connected" ? "connected" : ""}`}>{apiStatus}</span>
       <button className="signout-button" onClick={signOut}>Sign out</button>
     </nav>
-    {page === "balancing" ? <TillBalancing user={user} />
-      : page === "terminals" ? <TerminalManagement />
-        : page === "shop-status" ? <GeneralShopStatus user={user} />
-          : page === "branch-status" ? <BranchStatus user={user} />
-            : page === "shortage-counter" ? <BranchShortageCounter user={user} />
-              : page === "daily-inputs" ? <SupervisorDailyInputs user={user} />
-                : page === "cash-book" ? <CashBook user={user} />
-                  : page === "users" ? <UserManagement currentUser={user} />
+    {activePage === "balancing" ? <TillBalancing user={user} />
+      : activePage === "terminals" ? <TerminalManagement />
+        : activePage === "shop-status" && manager ? <GeneralShopStatus user={user} />
+          : activePage === "branch-status" ? <BranchStatus user={user} />
+            : activePage === "shortage-counter" ? <BranchShortageCounter user={user} />
+              : activePage === "daily-inputs" ? <SupervisorDailyInputs user={user} />
+                : activePage === "cash-book" ? <CashBook user={user} />
+                  : activePage === "users" ? <UserManagement currentUser={user} />
                     : <MasterData />}
   </>;
 }

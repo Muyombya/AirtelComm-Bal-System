@@ -9,9 +9,17 @@ const figureTone = (value, emphasis = "") => Number(value) < 0 ? "negative-figur
 
 function providerGroup(name) {
   const normalized = String(name || "").trim().toLocaleLowerCase();
-  return ["mtn", "airtel", "roving", "africell", "warid"].some((word) => normalized.includes(word))
+  return ["mtn", "airtel", "master", "roving", "africell", "warid"].some((word) => normalized.includes(word))
     ? "mobile"
     : "banks";
+}
+
+function reportItemIdentity(name) {
+  const label = String(name || "Other").trim();
+  const normalized = label.toLocaleLowerCase();
+  if (normalized.includes("mtn")) return { key: "provider:mtn", name: "Mtn Mobile Money" };
+  if (normalized.includes("airtel")) return { key: "provider:airtel", name: "Airtel Money" };
+  return { key: normalized, name: label };
 }
 
 function printBranchStatus() {
@@ -393,18 +401,18 @@ export default function BranchStatus({ user }) {
   const groupedItems = useMemo(() => {
     const items = new Map();
     for (const item of positions) {
-      const key = item.name.toLocaleLowerCase();
-      const current = items.get(key) || { name: item.name, amount: 0, hasBalance: false, count: 0, hasTransactions: false };
+      const identity = reportItemIdentity(item.name);
+      const current = items.get(identity.key) || { name: identity.name, amount: 0, hasBalance: false, count: 0, hasTransactions: false };
       current.amount += Number(item.amount || 0);
       current.hasBalance = true;
-      items.set(key, current);
+      items.set(identity.key, current);
     }
     for (const item of transactions) {
-      const key = item.name.toLocaleLowerCase();
-      const current = items.get(key) || { name: item.name, amount: 0, hasBalance: false, count: 0, hasTransactions: false };
+      const identity = reportItemIdentity(item.name);
+      const current = items.get(identity.key) || { name: identity.name, amount: 0, hasBalance: false, count: 0, hasTransactions: false };
       current.count += Number(item.count || 0);
       current.hasTransactions = true;
-      items.set(key, current);
+      items.set(identity.key, current);
     }
     const groups = { mobile: [], banks: [] };
     for (const item of items.values()) groups[providerGroup(item.name)].push(item);
