@@ -77,7 +77,7 @@ export async function setCashBookOpeningBalance(req, res, next) {
   try {
     const branchId = positiveId(req.body.branchId || 1, "Branch ID");
     const openingBalance = Number(String(req.body.openingBalance ?? "").replace(/,/g, ""));
-    if (!Number.isFinite(openingBalance) || openingBalance < 0) { const e = new Error("Opening Balance must be zero or greater."); e.statusCode = 400; throw e; }
+    if (!Number.isFinite(openingBalance)) { const e = new Error("Opening Balance must be a valid amount."); e.statusCode = 400; throw e; }
     await client.query("BEGIN"); await ensureBranch(client, branchId);
     const existingEntries = await client.query(`SELECT COUNT(*)::INT AS count FROM cash_book_entries WHERE branch_id=$1`, [branchId]);
     if (existingEntries.rows[0].count > 0) { const e = new Error("Opening Balance cannot be changed after Cash Book transactions have been recorded."); e.statusCode = 409; throw e; }
@@ -115,15 +115,9 @@ export async function createCashBookEntry(req, res, next) {
     await client.query("BEGIN");
     if (branchId) await ensureBranch(client, branchId);
 
-    if (entryType === "EXPENSE" && expenseScope === "BRANCH") {
-      const account = await client.query(`SELECT opening_balance, opening_set_at FROM cash_book_accounts WHERE branch_id=$1 FOR UPDATE`, [branchId]);
-      if (!account.rowCount || !account.rows[0].opening_set_at) { const e = new Error("Set the Cash Book Opening Balance before recording transactions."); e.statusCode = 409; throw e; }
-      const position = await client.query(`SELECT (cba.opening_balance + COALESCE(SUM(CASE WHEN cbe.entry_type='TOP_UP' THEN cbe.amount ELSE -cbe.amount END),0))::NUMERIC(18,2) AS balance
-        FROM cash_book_accounts cba LEFT JOIN cash_book_entries cbe ON cbe.branch_id=cba.branch_id
-        WHERE cba.branch_id=$1 GROUP BY cba.opening_balance`, [branchId]);
-      const available = Number(position.rows[0]?.balance || 0);
-      if (amount > available) { const e = new Error(`Expense cannot exceed the available Cash Book balance of UGX ${available.toLocaleString("en-UG")}.`); e.statusCode = 409; throw e; }
-    }
+    // Branch expenses may be recorded even if the opening-balance marker was
+    // never set. Cash Book totals are ledger-derived, so these entries can put
+    // the account below zero and later top-ups will offset the deficit.
 
     const inserted = await client.query(`INSERT INTO cash_book_entries
       (branch_id,entry_type,amount,category,description,reference,business_date,created_by,expense_scope)

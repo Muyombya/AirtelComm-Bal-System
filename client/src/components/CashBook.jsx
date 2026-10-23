@@ -18,6 +18,7 @@ export default function CashBook({ user }) {
   const [categories,setCategories]=useState([]); const [monthly,setMonthly]=useState(null); const [companyMonthly,setCompanyMonthly]=useState(null); const [reportMonth,setReportMonth]=useState(currentMonth);
   const [ledger,setLedger]=useState(null); const [ledgerScope,setLedgerScope]=useState("ALL"); const [ledgerLoading,setLedgerLoading]=useState(true);
   const [opening,setOpening]=useState(""); const [entry,setEntry]=useState({type:"EXPENSE",scope:"BRANCH",amount:"",category:"",description:""});
+  const [entryReview,setEntryReview]=useState(null); const [entryReviewVerified,setEntryReviewVerified]=useState(false);
   const [loading,setLoading]=useState(true); const [reportLoading,setReportLoading]=useState(true); const [busy,setBusy]=useState(false); const [message,setMessage]=useState(""); const [error,setError]=useState("");
   const [emailOpen,setEmailOpen]=useState(false); const [emailSending,setEmailSending]=useState(false);
   const [emailForm,setEmailForm]=useState({to:"",cc:"",subject:"",message:""});
@@ -79,7 +80,51 @@ export default function CashBook({ user }) {
     finally{setEmailSending(false);}
   }
 
-  async function saveEntry(e){e.preventDefault();setBusy(true);setError("");setMessage("");try{const effectiveScope=user?.role==="SUPERVISOR"?"BRANCH":entry.scope; const isCompany=entry.type==="EXPENSE"&&effectiveScope==="COMPANY";await createCashBookEntry({branchId:isCompany?null:Number(branchId),entryType:entry.type,expenseScope:entry.type==="EXPENSE"?effectiveScope:"BRANCH",amount:Number(rawNumber(entry.amount)||0),category:entry.type==="EXPENSE"?entry.category:null,description:String(entry.description??"").trim()||null,businessDate:date});setEntry({type:"EXPENSE",scope:"BRANCH",amount:"",category:categories[0]?.name||"",description:""});setMessage(isCompany?"Company expense recorded successfully.":entry.type==="EXPENSE"?"Expense recorded successfully.":"Funds added successfully.");await Promise.all([load(),loadMonthly(),loadLedger()]);}catch(e){setError(e?.message||"Failed to save Cash Book entry.");}finally{setBusy(false);}}
+  function saveEntry(e){
+    e.preventDefault();
+    setError("");
+    setMessage("");
+    const amount=Number(rawNumber(entry.amount)||0);
+    if(!Number.isFinite(amount)||amount<=0){setError("Enter an amount greater than zero.");return;}
+    const effectiveScope=user?.role==="SUPERVISOR"?"BRANCH":entry.scope;
+    const isCompany=entry.type==="EXPENSE"&&effectiveScope==="COMPANY";
+    const currentClosing=Number(data?.totals?.closingBalance||0);
+    setEntryReview({
+      entryType:entry.type,
+      expenseScope:entry.type==="EXPENSE"?effectiveScope:"BRANCH",
+      branchId:isCompany?null:Number(branchId),
+      amount,
+      category:entry.type==="EXPENSE"?entry.category:null,
+      description:String(entry.description??"").trim()||null,
+      businessDate:date,
+      branchName:selectedBranch?.name||user?.branch_name||"Selected branch",
+      currentClosing,
+      projectedClosing:isCompany?null:currentClosing+(entry.type==="TOP_UP"?amount:-amount),
+      isCompany,
+    });
+    setEntryReviewVerified(false);
+  }
+
+  async function confirmEntry(){
+    if(!entryReview||!entryReviewVerified||busy)return;
+    setBusy(true);setError("");setMessage("");
+    try{
+      await createCashBookEntry({
+        branchId:entryReview.branchId,
+        entryType:entryReview.entryType,
+        expenseScope:entryReview.expenseScope,
+        amount:entryReview.amount,
+        category:entryReview.category,
+        description:entryReview.description,
+        businessDate:entryReview.businessDate,
+      });
+      setEntry({type:"EXPENSE",scope:"BRANCH",amount:"",category:categories[0]?.name||"",description:""});
+      setMessage(entryReview.isCompany?"Company expense recorded successfully.":entryReview.entryType==="EXPENSE"?"Expense recorded successfully.":"Funds added successfully.");
+      setEntryReview(null);setEntryReviewVerified(false);
+      await Promise.all([load(),loadMonthly(),loadLedger()]);
+    }catch(e){setError(e?.message||"Failed to save Cash Book entry.");}
+    finally{setBusy(false);}
+  }
 
   if(!branchReady && !loading) return (
     <main className="cash-book-page">
@@ -103,8 +148,8 @@ export default function CashBook({ user }) {
     {message&&<div className="cash-book-message">{message}</div>}{error&&<div className="cash-book-error">{error}</div>}
     {!allBranches&&loading?<div className="cash-book-empty">Loading Cash Book…</div>:<>
       {!allBranches&&!companyView&&<><section className="cash-book-summary"><div><span>Opening Balance</span><strong>{money(data?.openingBalance)}</strong></div><div><span>Funds Added</span><strong>{money(data?.daily?.topUps)}</strong></div><div><span>Expenses</span><strong>{money(data?.daily?.expenses)}</strong></div><div className="cash-book-closing"><span>Closing Balance</span><strong>{money(data?.totals?.closingBalance)}</strong></div></section>
-      <section className="cash-book-panel"><div className="cash-book-title">OPENING BALANCE</div><div className="cash-book-opening-row"><input inputMode="numeric" value={formatInput(opening)} onChange={e=>setOpening(rawNumber(e.target.value))} disabled={openingLocked||busy} placeholder="Enter opening balance"/><button type="button" onClick={saveOpening} disabled={openingLocked||busy}>Save Opening Balance</button></div>{openingLocked&&<small>Opening Balance is locked after Cash Book transactions have been established.</small>}</section></>}
-      {!allBranches&&!companyView&&<section className="cash-book-panel"><div className="cash-book-title">RECORD CASH BOOK ENTRY</div><form className="cash-book-form" onSubmit={saveEntry}><select value={entry.type} onChange={e=>setEntry({...entry,type:e.target.value,scope:"BRANCH",category:e.target.value==="EXPENSE"?(entry.category||categories[0]?.name||""):""})}><option value="EXPENSE">Expense</option><option value="TOP_UP">Funds Added</option></select>{entry.type==="EXPENSE"&&user?.role!=="SUPERVISOR"&&<select value={entry.scope} onChange={e=>setEntry({...entry,scope:e.target.value})}><option value="BRANCH">Branch Expense</option><option value="COMPANY">Company / Central</option></select>}{entry.type==="EXPENSE"&&<select required value={entry.category} onChange={e=>setEntry({...entry,category:e.target.value})}><option value="">Select Expense Category</option>{categories.map(x=><option key={x.id} value={x.name}>{x.name}</option>)}</select>}<input inputMode="numeric" required value={formatInput(entry.amount)} onChange={e=>setEntry({...entry,amount:rawNumber(e.target.value)})} placeholder="Amount"/><input value={entry.description} onChange={e=>setEntry({...entry,description:e.target.value})} placeholder="Description (optional)"/><button disabled={busy||(!data?.openingSetAt&&entry.scope==="BRANCH")}>Record</button></form>{entry.type==="EXPENSE"&&entry.scope==="COMPANY"&&<small className="cash-book-company-note">Company / Central expenses are recorded in the central ledger and do not reduce a branch Cash Book balance.</small>}</section>}
+      <section className="cash-book-panel"><div className="cash-book-title">OPENING BALANCE</div><div className="cash-book-opening-row"><input inputMode="numeric" value={formatInput(opening)} onChange={e=>setOpening(rawNumber(e.target.value))} disabled={openingLocked||busy} placeholder="Enter opening balance"/><button type="button" onClick={saveOpening} disabled={openingLocked||busy}>Save Opening Balance</button></div><small>Negative balances are allowed. Funds Added entries reduce the deficit and increase the balance.</small>{openingLocked&&<small>Opening Balance is locked after Cash Book transactions have been established.</small>}</section></>}
+      {!allBranches&&!companyView&&<section className="cash-book-panel"><div className="cash-book-title">RECORD CASH BOOK ENTRY</div><form className="cash-book-form" onSubmit={saveEntry}><select value={entry.type} onChange={e=>setEntry({...entry,type:e.target.value,scope:"BRANCH",category:e.target.value==="EXPENSE"?(entry.category||categories[0]?.name||""):""})}><option value="EXPENSE">Expense</option><option value="TOP_UP">Funds Added</option></select>{entry.type==="EXPENSE"&&user?.role!=="SUPERVISOR"&&<select value={entry.scope} onChange={e=>setEntry({...entry,scope:e.target.value})}><option value="BRANCH">Branch Expense</option><option value="COMPANY">Company / Central</option></select>}{entry.type==="EXPENSE"&&<select required value={entry.category} onChange={e=>setEntry({...entry,category:e.target.value})}><option value="">Select Expense Category</option>{categories.map(x=><option key={x.id} value={x.name}>{x.name}</option>)}</select>}<input inputMode="numeric" required value={formatInput(entry.amount)} onChange={e=>setEntry({...entry,amount:rawNumber(e.target.value)})} placeholder="Amount"/><input value={entry.description} onChange={e=>setEntry({...entry,description:e.target.value})} placeholder="Description (optional)"/><button disabled={busy}>Review Entry</button></form>{entry.type==="EXPENSE"&&entry.scope==="COMPANY"&&<small className="cash-book-company-note">Company / Central expenses are recorded in the central ledger and do not reduce a branch Cash Book balance.</small>}</section>}
 
       <section className={`cash-book-panel cash-book-company-total-panel ${user?.role==="SUPERVISOR"?"supervisor-hidden":""}`}><div className="cash-book-title">COMPANY-WIDE TOTAL EXPENDITURE — {reportMonth}</div><div className="cash-book-company-total-body"><div><span>All Branch Expenses</span><strong>{money(companyMonthly?.summary?.branchExpenses)}</strong></div><div><span>Company / Central</span><strong>{money(companyMonthly?.summary?.companyExpenses)}</strong></div><div className="cash-book-combined"><span>COMBINED TOTAL EXPENDITURE</span><strong>{money(companyMonthly?.summary?.combinedExpenses)}</strong></div></div><small>This is the combined expenditure of every branch plus all Company / Central expenses for the selected month.</small></section>
 
@@ -204,6 +249,25 @@ export default function CashBook({ user }) {
 
       {!allBranches&&!companyView&&<section className="cash-book-panel"><div className="cash-book-title">TODAY'S CASH BOOK ENTRIES</div><div className="cash-book-table"><div className="cash-book-row cash-book-head"><span>Date / Time</span><span>Type / Category</span><span>Description</span><span>Amount</span></div>{history.map(x=><div className="cash-book-row" key={x.id}><span>{new Date(x.entered_at).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</span><span>{x.entry_type==="EXPENSE"?x.category||"Expense":"Funds Added"}</span><span>{x.description||"—"}</span><strong>{money(x.amount)}</strong></div>)}{!history.length&&<div className="cash-book-empty">No Cash Book history yet.</div>}</div></section>}
     </>}
+    {entryReview&&<div className="cash-book-entry-review-overlay" role="presentation"><section className="cash-book-entry-review" role="dialog" aria-modal="true" aria-labelledby="cash-book-entry-review-title">
+      <header><div><span>FINAL CHECK · NOT SAVED YET</span><h2 id="cash-book-entry-review-title">Review Cash Book Entry</h2><p>Confirm this entry before it updates the Cash Book and reports.</p></div></header>
+      <div className="cash-book-entry-review-summary">
+        <div><span>Entry</span><strong>{entryReview.entryType==="EXPENSE"?"Expense":"Funds Added"}</strong></div>
+        <div><span>Branch / Scope</span><strong>{entryReview.isCompany?"Company / Central":entryReview.branchName}</strong></div>
+        <div><span>Business Date</span><strong>{entryReview.businessDate}</strong></div>
+        {entryReview.category&&<div><span>Category</span><strong>{entryReview.category}</strong></div>}
+        <div><span>Amount</span><strong>{money(entryReview.amount)}</strong></div>
+        <div><span>Description</span><strong>{entryReview.description||"—"}</strong></div>
+      </div>
+      <div className="cash-book-entry-review-impact">
+        {entryReview.isCompany
+          ? <p>This Company / Central expense will be recorded in the central ledger and will not change a branch Cash Book balance.</p>
+          : <><p>Current closing balance: <strong>{money(entryReview.currentClosing)}</strong><br/>Estimated closing balance after this {entryReview.entryType==="EXPENSE"?"expense":"funds addition"}: <strong>{money(entryReview.projectedClosing)}</strong></p><p>Cash Book balances can go below zero. Funds Added entries will offset a negative balance automatically.</p></>}
+      </div>
+      <label className="cash-book-entry-review-check"><input type="checkbox" checked={entryReviewVerified} onChange={e=>setEntryReviewVerified(e.target.checked)}/><span>I have checked the entry type, amount, date, and details.</span></label>
+      {error&&<div className="cash-book-error">{error}</div>}
+      <div className="cash-book-entry-review-actions"><button type="button" onClick={()=>{setEntryReview(null);setEntryReviewVerified(false);setError("");}} disabled={busy}>Back to edit</button><button type="button" onClick={confirmEntry} disabled={!entryReviewVerified||busy}>{busy?"Recording…":"Confirm and record"}</button></div>
+    </section></div>}
     {emailOpen&&<div className="cash-book-email-overlay" role="dialog" aria-modal="true" aria-labelledby="cash-book-email-title">
       <form className="cash-book-email-dialog" onSubmit={sendReportEmail}>
         <div className="cash-book-email-header">
