@@ -66,6 +66,8 @@ export default function TillBalancing({ user }) {
   const [historyError, setHistoryError] = useState("");
   const [recordedBalanceStatus, setRecordedBalanceStatus] = useState("");
   const [dailyTransactionValidationOpen, setDailyTransactionValidationOpen] = useState(false);
+  const [reviewDraft, setReviewDraft] = useState(null);
+  const [reviewVerified, setReviewVerified] = useState(false);
   const [shortagePosition, setShortagePosition] = useState(null);
   const [settlementOpen, setSettlementOpen] = useState(false);
   const [settlementEvent, setSettlementEvent] = useState(null);
@@ -297,43 +299,84 @@ export default function TillBalancing({ user }) {
       return;
     }
 
-    setSaving(true);
-    try {
-      const cashItems = NOTE_DENOMINATIONS.map((denomination) => ({
-        itemType: "DENOMINATION",
+    const cashItems = NOTE_DENOMINATIONS.map((denomination) => ({
+      itemType: "DENOMINATION",
+      denomination,
+      quantity: Number(cash[denomination] || 0),
+    }));
+    COIN_DENOMINATIONS.forEach((denomination) => {
+      cashItems.push({
+        itemType: "COINS",
         denomination,
-        quantity: Number(cash[denomination] || 0),
-      }));
-      COIN_DENOMINATIONS.forEach((denomination) => {
-        cashItems.push({
-          itemType: "COINS",
-          denomination,
-          quantity: Number(coins[denomination] || 0),
-        });
+        quantity: Number(coins[denomination] || 0),
       });
-      cashItems.push({ itemType: "BATCH", amount: inputNumber(batch) });
+    });
+    cashItems.push({ itemType: "BATCH", amount: inputNumber(batch) });
 
-      const floatBalances = context.terminals.map((terminal) => ({
-        terminalId: terminal.terminal_id,
-        amount: inputNumber(floats[terminal.terminal_id]),
-      }));
+    const floatBalances = context.terminals.map((terminal) => ({
+      terminalId: terminal.terminal_id,
+      amount: inputNumber(floats[terminal.terminal_id]),
+    }));
 
-      const selectedTill = tills.find((item) => String(item.id) === String(tillId));
-      const branchId = selectedTill?.branch_id ?? user?.branch_id ?? null;
+    const selectedTill = tills.find((item) => String(item.id) === String(tillId));
+    const branchId = selectedTill?.branch_id ?? user?.branch_id ?? null;
+    const transactionPayload = Object.entries(transactionCounts).map(([terminalId, transactionCount]) => ({
+      terminalId: Number(terminalId),
+      transactionCount: Number(transactionCount || 0),
+    }));
 
-      const result = await createTillBalance({
+    setReviewDraft({
+      payload: {
         tillId: Number(tillId),
         branchId: branchId == null ? null : Number(branchId),
         businessDate,
         cashItems,
         floatBalances,
-        transactionCounts: Object.entries(transactionCounts).map(([terminalId, transactionCount]) => ({
-          terminalId: Number(terminalId),
-          transactionCount: Number(transactionCount || 0),
+        transactionCounts: transactionPayload,
+      },
+      tillName: selectedTill?.name || context?.till?.name || "Selected Till",
+      cashBreakdown: [
+        ...NOTE_DENOMINATIONS.map((denomination) => ({
+          label: `UGX ${formatMoney(denomination)} notes`,
+          quantity: Number(cash[denomination] || 0),
+          amount: denomination * Number(cash[denomination] || 0),
         })),
-      });
+        ...COIN_DENOMINATIONS.map((denomination) => ({
+          label: `UGX ${formatMoney(denomination)} coins`,
+          quantity: Number(coins[denomination] || 0),
+          amount: denomination * Number(coins[denomination] || 0),
+        })),
+        { label: "Batch", quantity: null, amount: inputNumber(batch) },
+      ],
+      floatBreakdown: context.terminals.map((terminal) => ({
+        label: terminal.terminal_name,
+        amount: inputNumber(floats[terminal.terminal_id]),
+      })),
+      transactionBreakdown: visibleDailyTransactions.map((terminal) => ({
+        label: terminal.terminal_name,
+        count: Number(transactionCounts[terminal.terminal_id] || 0),
+      })),
+      totalCash,
+      totalFloat,
+      actualCapital,
+      operatingCapital,
+      difference,
+      status,
+      attendantName: context?.attendant?.name || "—",
+    });
+    setReviewVerified(false);
+  }
+
+  async function confirmBalance() {
+    if (!reviewDraft || !reviewVerified || saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      const result = await createTillBalance(reviewDraft.payload);
       setMessage(`Balance recorded successfully — ${result.status}.`);
       setRecordedBalanceStatus(result.status);
+      setReviewDraft(null);
+      setReviewVerified(false);
 
       // Immediately refresh the Till Shortage Counter after recording a balance.
       // This preserves the established Till Balancing behaviour while the
@@ -767,6 +810,78 @@ export default function TillBalancing({ user }) {
               >
                 OK — Enter Transactions
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {reviewDraft && (
+        <div className="modal-backdrop" role="presentation">
+          <div className="history-modal balance-review-modal" role="dialog" aria-modal="true" aria-labelledby="balance-review-title">
+            <div className="modal-header">
+              <div>
+                <div className="eyebrow">FINAL CHECK · NOT SAVED YET</div>
+                <h2 id="balance-review-title">Review Till Balance</h2>
+                <p>Check these figures before they are recorded and included in Branch Status.</p>
+              </div>
+            </div>
+
+            <div className="balance-review-meta">
+              <div><span>Till</span><strong>{reviewDraft.tillName}</strong></div>
+              <div><span>Business Date</span><strong>{reviewDraft.payload.businessDate}</strong></div>
+              <div><span>Attendant</span><strong>{reviewDraft.attendantName}</strong></div>
+            </div>
+
+            <div className={`balance-review-result ${reviewDraft.status.toLowerCase()}`}>
+              <div><span>Total Cash</span><strong>UGX {formatMoney(reviewDraft.totalCash)}</strong></div>
+              <div><span>Total Float</span><strong>UGX {formatMoney(reviewDraft.totalFloat)}</strong></div>
+              <div><span>Actual Till Capital</span><strong>UGX {formatMoney(reviewDraft.actualCapital)}</strong></div>
+              <div><span>Operating Capital</span><strong>UGX {formatMoney(reviewDraft.operatingCapital)}</strong></div>
+              <div><span>Result</span><strong>{reviewDraft.status === "BALANCED" ? "BALANCED" : `${reviewDraft.status} BY UGX ${formatMoney(Math.abs(reviewDraft.difference))}`}</strong></div>
+            </div>
+
+            {reviewDraft.difference !== 0 && (
+              <div className={`balance-review-alert ${reviewDraft.status.toLowerCase()}`}>
+                This entry will record a {reviewDraft.status.toLowerCase()} of UGX {formatMoney(Math.abs(reviewDraft.difference))} and update the shortage or excess reporting. If this is unexpected, go back and correct the entries.
+              </div>
+            )}
+
+            <div className="balance-review-columns">
+              <section>
+                <h3>Cash count</h3>
+                <div className="balance-review-list">
+                  {reviewDraft.cashBreakdown.map((item) => (
+                    <div key={item.label}><span>{item.label}{item.quantity == null ? "" : ` × ${formatMoney(item.quantity)}`}</span><strong>UGX {formatMoney(item.amount)}</strong></div>
+                  ))}
+                </div>
+              </section>
+              <section>
+                <h3>Float by terminal</h3>
+                <div className="balance-review-list">
+                  {reviewDraft.floatBreakdown.map((item) => (
+                    <div key={item.label}><span>{item.label}</span><strong>UGX {formatMoney(item.amount)}</strong></div>
+                  ))}
+                  {!reviewDraft.floatBreakdown.length && <div><span>No active float terminals</span><strong>—</strong></div>}
+                </div>
+              </section>
+              <section>
+                <h3>Transactions</h3>
+                <div className="balance-review-list">
+                  {reviewDraft.transactionBreakdown.map((item) => (
+                    <div key={item.label}><span>{item.label}</span><strong>{formatMoney(item.count)}</strong></div>
+                  ))}
+                  {!reviewDraft.transactionBreakdown.length && <div><span>No active transaction terminals</span><strong>—</strong></div>}
+                </div>
+              </section>
+            </div>
+
+            <label className="balance-review-confirm">
+              <input type="checkbox" checked={reviewVerified} onChange={(event) => setReviewVerified(event.target.checked)} />
+              <span>I have checked the cash, float, and transaction figures against the actual counts.</span>
+            </label>
+            <div className="modal-actions">
+              <button className="secondary-button" type="button" onClick={() => { setReviewDraft(null); setReviewVerified(false); }} disabled={saving}>Back to edit</button>
+              <button className="primary-button" type="button" onClick={confirmBalance} disabled={!reviewVerified || saving}>{saving ? "Recording…" : "Confirm and record"}</button>
             </div>
           </div>
         </div>
