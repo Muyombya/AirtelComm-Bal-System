@@ -22,7 +22,6 @@ export default function SupervisorDailyInputs({ user }) {
   const [branchId, setBranchId] = useState(isSupervisor ? String(user?.branch_id || "") : "");
   const [date, setDate] = useState(today);
   const [accessories, setAccessories] = useState("");
-  const [remark, setRemark] = useState("");
   const [status, setStatus] = useState("BALANCED");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -53,7 +52,6 @@ export default function SupervisorDailyInputs({ user }) {
     try {
       const data = await getGeneralShopStatus(Number(branchId), date);
       setAccessories(data?.accessoriesCount ? Number(data.accessoriesCount).toLocaleString("en-UG") : "");
-      setRemark(data?.imbalanceRemark || data?.reason || "");
       setStatus(String(data?.totals?.status || "BALANCED").toUpperCase());
     } catch (e) {
       setError(e?.message || "Failed to load Supervisor Daily Inputs.");
@@ -80,7 +78,6 @@ export default function SupervisorDailyInputs({ user }) {
     const clearedKey = `supervisorDailyInputsCleared:${branchId}:${date}`;
     if (sessionStorage.getItem(clearedKey) === "1") {
       setAccessories("");
-      setRemark("");
 
       // Keep the freshly cleared form state when the user navigates away
       // and returns during the same browser session.
@@ -103,13 +100,12 @@ export default function SupervisorDailyInputs({ user }) {
     if (!Number.isInteger(value) || value < 0) return setError("Accessories Sales must be a valid non-negative whole amount.");
     setSaving(true);
     try {
-      await saveSupervisorDailyInputs(Number(branchId), date, value, remark.trim());
+      await saveSupervisorDailyInputs(Number(branchId), date, value);
       setMessage("Supervisor Daily Inputs saved successfully. General Shop Status has been updated.");
       // Clear the entry fields after a successful save so the form is ready
       // for the next daily input. Do not reload the saved values back into
       // the form here.
       setAccessories("");
-      setRemark("");
     } catch (e) {
       setError(e?.message || "Failed to save Supervisor Daily Inputs.");
     } finally {
@@ -168,18 +164,6 @@ export default function SupervisorDailyInputs({ user }) {
           <small className="sdi-help">Enter the total Accessories sales/activity amount for the selected business date.</small>
         </label>
 
-        <label className="sdi-field">
-          <span>IMBALANCE REMARK <small>OPTIONAL</small></span>
-          <textarea
-            rows="5"
-            value={remark}
-            disabled={historical}
-            onChange={(e) => setRemark(e.target.value)}
-            placeholder="Enter the supervisor's explanation or relevant remark for the day's imbalance."
-          />
-          <small className="sdi-help">This text is displayed in the General Shop Status → IMBALANCE REMARK section.</small>
-        </label>
-
         <div className="sdi-status-line">
           <span>GENERAL SHOP STATUS</span>
           <strong className={`sdi-status ${status.toLowerCase()}`}>{status}</strong>
@@ -197,7 +181,7 @@ export default function SupervisorDailyInputs({ user }) {
       </section>
 
       <section className="sdi-flow">
-        <div><strong>SUPERVISOR DAILY INPUTS</strong><span>Enter Accessories Sales + Imbalance Remark</span></div>
+        <div><strong>SUPERVISOR DAILY INPUTS</strong><span>Enter Accessories Sales</span></div>
         <div className="sdi-arrow">→</div>
         <div><strong>GENERAL SHOP STATUS</strong><span>Displays the saved values</span></div>
       </section>

@@ -32,7 +32,7 @@ export function getTillTerminals(tillId) { return request(`/tills/${tillId}/term
 export function assignTerminalToTill(tillId, terminalId) { return request(`/tills/${tillId}/terminals`, { method: "POST", body: JSON.stringify({ terminalId: Number(terminalId) }) }); }
 export function unassignTerminalFromTill(tillId, terminalId) { return request(`/tills/${tillId}/terminals/${terminalId}`, { method: "DELETE" }); }
 export function reorderTillTerminals(tillId, terminalIds) { return request(`/tills/${tillId}/terminals/order`, { method: "PUT", body: JSON.stringify({ terminalIds: terminalIds.map(Number) }) }); }
-export function getTillBalancingContext(tillId) { return request(`/tills/${tillId}/balancing-context`); }
+export function getTillBalancingContext(tillId, businessDate) { const p=new URLSearchParams(); if(businessDate)p.set("businessDate",businessDate); const q=p.toString(); return request(`/tills/${tillId}/balancing-context${q?`?${q}`:""}`); }
 export async function createTillBalance(payload) {
   const result = await request("/till-balances", {
     method: "POST",
@@ -58,6 +58,14 @@ export async function recordTillShortageSettlement(tillId, tillBalanceId, amount
   });
   return result;
 }
+export async function recordTillMissingFundsPayment(tillId, responsibilityId, amount, paymentDate, note="", branchId=null) {
+  const result = await request(`/tills/${tillId}/missing-funds/${encodeURIComponent(responsibilityId)}/payments`, {
+    method:"POST",
+    body:JSON.stringify({ amount:Number(amount), paymentDate, note })
+  });
+  notifyBranchReportChanged({ branchId: result?.branchId ?? branchId, businessDate: result?.payment?.payment_date || paymentDate, reason:"missing-funds-settlement-recorded" });
+  return result;
+}
 export function getTillBalances(tillId, businessDate) { const p=new URLSearchParams(); if(businessDate)p.set("businessDate",businessDate); const q=p.toString(); return request(`/tills/${tillId}/balances${q?`?${q}`:""}`); }
 export function getTillBalanceDetails(balanceId) { return request(`/till-balances/${balanceId}`); }
 export function getTillTransactionCounts(tillId, businessDate) { const p=new URLSearchParams(); if(businessDate)p.set("businessDate",businessDate); const q=p.toString(); return request(`/tills/${tillId}/transaction-counts${q?`?${q}`:""}`); }
@@ -70,7 +78,7 @@ export async function saveTillTransactionCounts(tillId, businessDate, items) {
   return result;
 }
 export function getGeneralShopStatus(branchId, businessDate) { const p=new URLSearchParams({branchId:String(branchId),businessDate}); return request(`/general-shop-status?${p.toString()}`); }
-export function saveSupervisorDailyInputs(branchId,businessDate,accessoriesCount,reason) { return request("/general-shop-status",{method:"PUT",body:JSON.stringify({branchId:Number(branchId),businessDate,accessoriesCount:Number(accessoriesCount||0),reason:String(reason||"").trim()})}); }
+export function saveSupervisorDailyInputs(branchId,businessDate,accessoriesCount) { return request("/general-shop-status",{method:"PUT",body:JSON.stringify({branchId:Number(branchId),businessDate,accessoriesCount:Number(accessoriesCount||0)})}); }
 export async function getGeneralShopStatusPdf(branchId, businessDate) {
   const params = new URLSearchParams({ branchId: String(branchId), businessDate });
   const response = await fetch(`${API_BASE_URL}/general-shop-status/pdf?${params.toString()}`, {
@@ -100,23 +108,6 @@ export async function saveGeneralShopStatus(branchId,businessDate,accessoriesCou
 export async function saveGeneralShopTransactionCounts(branchId,businessDate,items) {
   const result = await request("/general-shop-status/transaction-counts",{method:"PUT",body:JSON.stringify({branchId,businessDate,items})});
   notifyBranchReportChanged({ branchId, businessDate, reason: "branch-transaction-counts-updated" });
-  return result;
-}
-export async function recordShortagePayment(branchId,employeeId,amount,paymentDate,note="") {
-  const result = await request("/branch-shortages/payments",{method:"POST",body:JSON.stringify({branchId,employeeId,amount,paymentDate,note})});
-  notifyBranchReportChanged({ branchId, businessDate: paymentDate, reason: "shortage-payment-recorded" });
-  return result;
-}
-export function getBranchShortageEmployees(branchId) { return request(`/branch-shortages/employees?branchId=${encodeURIComponent(branchId)}`); }
-export function getAssignableTillShortages(branchId,businessDate) { const p=new URLSearchParams({branchId:String(branchId),businessDate}); return request(`/branch-shortages/assignable-till-events?${p.toString()}`); }
-export async function recordExternalShortageResponsibility(payload) {
-  const result = await request("/branch-shortages/responsibilities",{method:"POST",body:JSON.stringify(payload)});
-  notifyBranchReportChanged({ branchId: payload.branchId, businessDate: payload.responsibilityDate, reason: "external-shortage-recorded" });
-  return result;
-}
-export async function recordExternalShortagePayment(responsibilityId,payload) {
-  const result = await request(`/branch-shortages/responsibilities/${encodeURIComponent(responsibilityId)}/payments`,{method:"POST",body:JSON.stringify(payload)});
-  notifyBranchReportChanged({ branchId: payload.branchId, businessDate: result?.payment?.payment_date || payload.paymentDate, reason: "external-shortage-settled" });
   return result;
 }
 export function getCashBook(branchId,businessDate) { const p=new URLSearchParams({branchId:String(branchId),businessDate}); return request(`/cash-book?${p.toString()}`); }

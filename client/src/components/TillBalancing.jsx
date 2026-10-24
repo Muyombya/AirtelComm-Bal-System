@@ -7,6 +7,7 @@ import {
   getTillBalancingContext,
   getTillShortagePosition,
   recordTillShortageSettlement,
+  recordTillMissingFundsPayment,
   getTills,
   getCurrentUser,
   reorderTillTerminals,
@@ -41,6 +42,11 @@ function formatEntry(value) {
   return decimal !== undefined ? `${formattedWhole}.${decimal}` : formattedWhole;
 }
 
+function formatWholeNumberEntry(value) {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  return digits ? new Intl.NumberFormat("en-UG", { maximumFractionDigits: 0 }).format(Number(digits)) : "";
+}
+
 function formatDateTime(value) {
   return value ? new Date(value).toLocaleString("en-UG") : "—";
 }
@@ -68,6 +74,8 @@ export default function TillBalancing({ user }) {
   const [dailyTransactionValidationOpen, setDailyTransactionValidationOpen] = useState(false);
   const [reviewDraft, setReviewDraft] = useState(null);
   const [reviewVerified, setReviewVerified] = useState(false);
+  const [missingFundsOpen, setMissingFundsOpen] = useState(false);
+  const [preBalanceResponsibilities, setPreBalanceResponsibilities] = useState([]);
   const [shortagePosition, setShortagePosition] = useState(null);
   const [settlementOpen, setSettlementOpen] = useState(false);
   const [settlementEvent, setSettlementEvent] = useState(null);
@@ -146,6 +154,8 @@ export default function TillBalancing({ user }) {
     setContext(nextContext);
     setHistory(nextHistory);
     setShortagePosition(nextShortage);
+    setPreBalanceResponsibilities([]);
+    setMissingFundsOpen(false);
     setSettlementEvent(null);
     setSettlementAmount("");
     setSettlementNote("");
@@ -181,6 +191,12 @@ export default function TillBalancing({ user }) {
         Object.fromEntries((nextContext.dailyTransactions || []).map((terminal) => [terminal.terminal_id, terminal.transactionCount || 0]))
       );
     }
+  }
+
+  function updateMissingFund(index, field, value) {
+    setPreBalanceResponsibilities((current) => current.map((entry, rowIndex) =>
+      rowIndex === index ? { ...entry, [field]: value } : entry
+    ));
   }
 
   useEffect(() => {
@@ -287,6 +303,15 @@ export default function TillBalancing({ user }) {
     setMessage("");
     setError("");
 
+    const incompleteMissingFund = preBalanceResponsibilities.some((entry) =>
+      !(inputNumber(entry.amount) > 0) || !String(entry.note || "").trim()
+    );
+    if (incompleteMissingFund) {
+      setMissingFundsOpen(true);
+      setError("Complete the amount and event or reason for each Missing Funds entry, or remove the incomplete row.");
+      return;
+    }
+
     // Daily Transactions require at least two non-zero entries before
     // a balance can be recorded. Other displayed terminals may legitimately
     // remain at zero when their transactions are not recorded for the day.
@@ -324,6 +349,10 @@ export default function TillBalancing({ user }) {
       terminalId: Number(terminalId),
       transactionCount: Number(transactionCount || 0),
     }));
+    const carriedResponsibilityOffset = Number((context?.carriedResponsibilities || []).reduce((sum, item) => sum + Number(item.balance || 0), 0).toFixed(2));
+    const newResponsibilityAmount = Number(preBalanceResponsibilities.reduce((sum, item) => sum + inputNumber(item.amount), 0).toFixed(2));
+    const netDifference = Number((difference + carriedResponsibilityOffset + newResponsibilityAmount).toFixed(2));
+    const netStatus = netDifference < 0 ? "SHORT" : netDifference > 0 ? "EXCESS" : "BALANCED";
 
     setReviewDraft({
       payload: {
@@ -333,6 +362,7 @@ export default function TillBalancing({ user }) {
         cashItems,
         floatBalances,
         transactionCounts: transactionPayload,
+        preBalanceResponsibilities: preBalanceResponsibilities.map((entry) => ({ amount: inputNumber(entry.amount), note: entry.note.trim() })),
       },
       tillName: selectedTill?.name || context?.till?.name || "Selected Till",
       cashBreakdown: [
@@ -360,8 +390,14 @@ export default function TillBalancing({ user }) {
       totalFloat,
       actualCapital,
       operatingCapital,
-      difference,
-      status,
+      difference: netDifference,
+      grossDifference: difference,
+      carriedResponsibilityOffset,
+      carriedResponsibilities: context?.carriedResponsibilities || [],
+      responsibilityOffset: newResponsibilityAmount,
+      totalResponsibilityOffset: Number((carriedResponsibilityOffset + newResponsibilityAmount).toFixed(2)),
+      preBalanceResponsibilities: preBalanceResponsibilities.map((entry) => ({ amount: inputNumber(entry.amount), note: entry.note.trim() })),
+      status: netStatus,
       attendantName: context?.attendant?.name || "—",
     });
     setReviewVerified(false);
@@ -369,6 +405,13 @@ export default function TillBalancing({ user }) {
 
   async function confirmBalance() {
     if (!reviewDraft || !reviewVerified || saving) return;
+    const invalidResponsibility = (reviewDraft.preBalanceResponsibilities || []).some((entry) =>
+      !(inputNumber(entry.amount) > 0) || !entry.note.trim()
+    );
+    if (invalidResponsibility) {
+      setError("Complete the amount and event or reason for each Missing Funds item, or remove the empty row.");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -377,6 +420,8 @@ export default function TillBalancing({ user }) {
       setRecordedBalanceStatus(result.status);
       setReviewDraft(null);
       setReviewVerified(false);
+      setPreBalanceResponsibilities([]);
+      setMissingFundsOpen(false);
 
       // Immediately refresh the Till Shortage Counter after recording a balance.
       // This preserves the established Till Balancing behaviour while the
@@ -435,8 +480,8 @@ export default function TillBalancing({ user }) {
   async function settleShortage() {
     const amount = inputNumber(settlementAmount);
     const eventOutstanding = Number(settlementEvent?.outstanding || 0);
-    if (!settlementEvent?.tillBalanceId) {
-      setError("Select a shortage event to settle.");
+    if (!settlementEvent?.tillBalanceId && !settlementEvent?.responsibilityId) {
+      setError("Select a shortage or missing-funds event to settle.");
       return;
     }
     if (!amount || amount <= 0) {
@@ -461,14 +506,10 @@ export default function TillBalancing({ user }) {
     setError("");
     setMessage("");
     try {
-      const result = await recordTillShortageSettlement(
-        tillId,
-        settlementEvent.tillBalanceId,
-        amount,
-        paymentDate,
-        settlementNote,
-        tills.find((item) => String(item.id) === String(tillId))?.branch_id ?? user?.branch_id ?? null
-      );
+      const branchId = tills.find((item) => String(item.id) === String(tillId))?.branch_id ?? user?.branch_id ?? null;
+      const result = settlementEvent.responsibilityId
+        ? await recordTillMissingFundsPayment(tillId, settlementEvent.responsibilityId, amount, paymentDate, settlementNote, branchId)
+        : await recordTillShortageSettlement(tillId, settlementEvent.tillBalanceId, amount, paymentDate, settlementNote, branchId);
       setMessage(result.message || "Shortage settlement recorded successfully.");
       setSettlementOpen(false);
       setSettlementEvent(null);
@@ -555,6 +596,24 @@ export default function TillBalancing({ user }) {
       {error && <div className="error-message">{error}</div>}
 
       <form onSubmit={submitBalance}>
+        <section className={`panel missing-funds-panel${missingFundsOpen ? " is-open" : ""}`}>
+          <button className="missing-funds-toggle" type="button" aria-expanded={missingFundsOpen} onClick={() => setMissingFundsOpen((open) => !open)}>
+            <span><strong>Missing Funds</strong><small>Declare amounts that are missing from this Till before counting.</small></span>
+            <span className="missing-funds-toggle-value">{preBalanceResponsibilities.length ? `${preBalanceResponsibilities.length} item${preBalanceResponsibilities.length === 1 ? "" : "s"}` : "＋"}</span>
+          </button>
+          {missingFundsOpen && <div className="missing-funds-content">
+            <p>Record each missing-funds event. Its amount is tracked separately from the Till attendant's shortage, and the remaining Till difference may still be a shortage or excess.</p>
+            {preBalanceResponsibilities.map((entry, index) => (
+              <div className="missing-funds-row" key={`missing-fund-${index}`}>
+                <label><span>AMOUNT (UGX)</span><input className="missing-funds-amount" type="text" inputMode="numeric" value={entry.amount} onChange={(event) => updateMissingFund(index, "amount", formatWholeNumberEntry(event.target.value))} placeholder="0" /></label>
+                <label><span>EVENT / REASON</span><input maxLength="240" value={entry.note} onChange={(event) => updateMissingFund(index, "note", event.target.value)} placeholder="e.g. Cash held in BFCU CDM" /></label>
+                <button className="missing-funds-remove" type="button" onClick={() => setPreBalanceResponsibilities((current) => current.filter((_, rowIndex) => rowIndex !== index))}>Remove</button>
+              </div>
+            ))}
+            <button className="secondary-button missing-funds-add" type="button" onClick={() => setPreBalanceResponsibilities((current) => [...current, { amount: "", note: "" }])}>Add missing funds</button>
+          </div>}
+        </section>
+
         <section className="balance-grid">
           <div className="panel">
             <div className="panel-heading">
@@ -665,8 +724,8 @@ export default function TillBalancing({ user }) {
         <section className={`panel shortage-settlement-panel ${shortagePosition.outstanding > 0 ? "has-debt" : "settled"}`}>
           <div className="panel-heading">
             <div>
-              <h2>Till Shortage Counter</h2>
-              <p>Shortage is tracked by its original Till balance event. Repayments are allocated directly to that event and never rewrite the physical Till balance.</p>
+              <h2>Till Shortage &amp; Excess Counter</h2>
+              <p>Shortage repayments stay tied to their original Till events. Recorded excess is shown separately and does not offset a shortage or repayment.</p>
             </div>
             <strong>UGX {formatMoney(shortagePosition.outstanding)}</strong>
           </div>
@@ -675,6 +734,7 @@ export default function TillBalancing({ user }) {
             <div className="shortage-settlement-metrics">
               <div><span>Current attendant</span><strong>{shortagePosition.currentEmployeeName || "—"}</strong></div>
               <div><span>Total shortage incurred</span><strong>UGX {formatMoney(shortagePosition.shortageIncurred)}</strong></div>
+              <div><span>Total excess recorded</span><strong className="settled-value">UGX {formatMoney(shortagePosition.excessIncurred)}</strong></div>
               <div><span>Recovered to date</span><strong>UGX {formatMoney(shortagePosition.paymentsToDate)}</strong></div>
               <div><span>Outstanding shortage</span><strong className={shortagePosition.outstanding > 0 ? "debt" : "settled-value"}>UGX {formatMoney(shortagePosition.outstanding)}</strong></div>
               <div><span>Effective working capital</span><strong>UGX {formatMoney(Math.max(operatingCapital - Number(shortagePosition.outstanding || 0), 0))}</strong></div>
@@ -710,6 +770,40 @@ export default function TillBalancing({ user }) {
             ) : (
               <div className="empty-state">No Till shortage events have been recorded.</div>
             )}
+          </div>
+
+          <div className="shortage-events-section excess-events-section">
+            <div className="shortage-section-heading">
+              <div><strong>Excess events</strong><span>Positive Till variances recorded at balancing are listed separately from shortage and are not treated as repayments.</span></div>
+            </div>
+            {shortagePosition.excessEvents?.length ? (
+              <div className="shortage-events-table">
+                <div className="shortage-event-row shortage-event-head"><span>Date</span><span>Employee</span><span>Till</span><span>Excess</span></div>
+                {shortagePosition.excessEvents.map((event) => (
+                  <div className="shortage-event-row" key={`excess-${event.tillBalanceId}`}>
+                    <span>{event.businessDate}</span><span>{event.employeeName}</span><span>{event.tillName}</span><strong className="settled-value">UGX {formatMoney(event.amount)}</strong>
+                  </div>
+                ))}
+              </div>
+            ) : <div className="empty-state">No excess events have been recorded for this Till.</div>}
+          </div>
+
+          <div className="shortage-events-section missing-funds-events-section">
+            <div className="shortage-section-heading">
+              <div><strong>Missing-funds events</strong><span>Amounts declared before balancing, tracked separately from the Till attendant's shortage. Outstanding total: UGX {formatMoney((shortagePosition.missingFunds || []).reduce((sum, event) => sum + Number(event.outstanding || 0), 0))}</span></div>
+            </div>
+            {shortagePosition.missingFunds?.length ? (
+              <div className="shortage-events-table">
+                <div className="shortage-event-row shortage-event-head"><span>Date</span><span>Event / reason</span><span>Amount</span><span>Recovered</span><span>Outstanding</span><span>Action</span></div>
+                {shortagePosition.missingFunds.map((event) => (
+                  <div className="shortage-event-row" key={`missing-fund-${event.responsibilityId}`}>
+                    <span>{event.businessDate}</span><span>{event.eventName}</span><span>UGX {formatMoney(event.amount)}</span><span>UGX {formatMoney(event.recovered)}</span>
+                    <span className={event.outstanding > 0 ? "debt" : "settled-value"}>UGX {formatMoney(event.outstanding)}</span>
+                    <span>{event.outstanding > 0 ? <button className="secondary-button settlement-button" type="button" onClick={() => openSettlement({ ...event, type: "missing-funds" })}>Settle</button> : <span className="settlement-status settled-status">SETTLED</span>}</span>
+                  </div>
+                ))}
+              </div>
+            ) : <div className="empty-state">No missing-funds events have been recorded for this Till.</div>}
           </div>
 
           {shortagePosition.payments?.length ? (
@@ -764,8 +858,8 @@ export default function TillBalancing({ user }) {
             <p>Record the actual repayment against the selected shortage event. This payment does not change the original physical Till balance.</p>
             <div className="settlement-detail-grid">
               <div><span>Shortage event date</span><strong>{settlementEvent.businessDate}</strong></div>
-              <div><span>Employee responsible</span><strong>{settlementEvent.employeeName}</strong></div>
-              <div><span>Original shortage</span><strong>UGX {formatMoney(settlementEvent.shortage)}</strong></div>
+              <div><span>{settlementEvent.responsibilityId ? "Event / reason" : "Employee responsible"}</span><strong>{settlementEvent.eventName || settlementEvent.employeeName}</strong></div>
+              <div><span>{settlementEvent.responsibilityId ? "Original missing amount" : "Original shortage"}</span><strong>UGX {formatMoney(settlementEvent.amount ?? settlementEvent.shortage)}</strong></div>
               <div><span>Already recovered</span><strong>UGX {formatMoney(settlementEvent.recovered)}</strong></div>
               <div><span>Outstanding before payment</span><strong>UGX {formatMoney(settlementEvent.outstanding)}</strong></div>
               <div><span>Remaining after payment</span><strong>UGX {formatMoney(Math.max(Number(settlementEvent.outstanding || 0) - inputNumber(settlementAmount), 0))}</strong></div>
@@ -837,8 +931,16 @@ export default function TillBalancing({ user }) {
               <div><span>Total Float</span><strong>UGX {formatMoney(reviewDraft.totalFloat)}</strong></div>
               <div><span>Actual Till Capital</span><strong>UGX {formatMoney(reviewDraft.actualCapital)}</strong></div>
               <div><span>Operating Capital</span><strong>UGX {formatMoney(reviewDraft.operatingCapital)}</strong></div>
-              <div><span>Result</span><strong>{reviewDraft.status === "BALANCED" ? "BALANCED" : `${reviewDraft.status} BY UGX ${formatMoney(Math.abs(reviewDraft.difference))}`}</strong></div>
+              <div><span>Raw variance</span><strong>{reviewDraft.grossDifference === 0 ? "UGX 0" : `${reviewDraft.grossDifference < 0 ? "−" : "+"}UGX ${formatMoney(Math.abs(reviewDraft.grossDifference))}`}</strong></div>
+              <div><span>Existing missing funds unpaid</span><strong>UGX {formatMoney(reviewDraft.carriedResponsibilityOffset)}</strong></div>
+              <div><span>New missing funds</span><strong>UGX {formatMoney(reviewDraft.responsibilityOffset)}</strong></div>
+              <div><span>Net Till result</span><strong>{reviewDraft.status === "BALANCED" ? "BALANCED" : `${reviewDraft.status} BY UGX ${formatMoney(Math.abs(reviewDraft.difference))}`}</strong></div>
             </div>
+
+            {(reviewDraft.preBalanceResponsibilities || []).length > 0 && <section className="balance-review-responsibilities">
+              <div className="balance-review-responsibilities-heading"><div><h3>Missing-funds events</h3><p>These amounts are tracked as separate Till events; any remaining difference stays on this Till.</p></div></div>
+              {reviewDraft.preBalanceResponsibilities.map((entry, index) => <div className="balance-review-declared-row" key={`${entry.note}-${index}`}><strong>{entry.note}</strong><span>UGX {formatMoney(entry.amount)}</span><span>Missing funds</span></div>)}
+            </section>}
 
             {reviewDraft.difference !== 0 && (
               <div className={`balance-review-alert ${reviewDraft.status.toLowerCase()}`}>
@@ -998,7 +1100,10 @@ export default function TillBalancing({ user }) {
 
           <section className={`result-card ${String(selectedHistory.balance.status || "").toLowerCase()}`}>
             <div><span>Actual Till Capital</span><strong>UGX {formatMoney(selectedHistory.balance.actual_till_capital)}</strong></div>
-            <div><span>Difference</span><strong>{selectedHistory.balance.status === "BALANCED" ? "UGX 0" : `${selectedHistory.balance.status === "SHORT" ? "−" : "+"}UGX ${formatMoney(Math.abs(selectedHistory.balance.difference))}`}</strong></div>
+            <div><span>Raw variance</span><strong>{Number(selectedHistory.balance.gross_difference || 0) === 0 ? "UGX 0" : `${Number(selectedHistory.balance.gross_difference) < 0 ? "−" : "+"}UGX ${formatMoney(Math.abs(selectedHistory.balance.gross_difference))}`}</strong></div>
+            <div><span>Existing missing funds unpaid</span><strong>UGX {formatMoney(Number(selectedHistory.balance.responsibility_offset_amount || 0) - Number(selectedHistory.balance.new_responsibility_amount || 0))}</strong></div>
+            <div><span>New missing funds</span><strong>UGX {formatMoney(selectedHistory.balance.new_responsibility_amount)}</strong></div>
+            <div><span>Net Till difference</span><strong>{selectedHistory.balance.status === "BALANCED" ? "UGX 0" : `${selectedHistory.balance.status === "SHORT" ? "−" : "+"}UGX ${formatMoney(Math.abs(selectedHistory.balance.difference))}`}</strong></div>
             <div><span>Status</span><strong className={`result-status ${String(selectedHistory.balance.status).toLowerCase()}`}>{selectedHistory.balance.status}</strong></div>
             <div><span>Balanced At</span><strong>{formatDateTime(selectedHistory.balance.balanced_at)}</strong></div>
           </section>
@@ -1006,7 +1111,7 @@ export default function TillBalancing({ user }) {
           <section className={`panel shortage-settlement-panel ${(selectedHistory.shortageCounter?.outstanding || 0) > 0 ? "has-debt" : "settled"}`}>
             <div className="panel-heading">
               <div>
-                <h2>Till Shortage Counter</h2>
+                <h2>Till Shortage &amp; Excess Counter</h2>
                 <p>Historical shortage position through {selectedHistory.shortageCounter?.asOfDate || selectedHistory.balance.business_date}.</p>
               </div>
               <strong>UGX {formatMoney(selectedHistory.shortageCounter?.outstanding)}</strong>
@@ -1016,6 +1121,7 @@ export default function TillBalancing({ user }) {
               <div className="shortage-settlement-metrics">
                 <div><span>Attendant</span><strong>{selectedHistory.balance.employee_name || "—"}</strong></div>
                 <div><span>Total shortage incurred</span><strong>UGX {formatMoney(selectedHistory.shortageCounter?.shortageIncurred)}</strong></div>
+                <div><span>Excess on this balance</span><strong className="settled-value">UGX {formatMoney(selectedHistory.shortageCounter?.excess)}</strong></div>
                 <div><span>Recovered to date</span><strong>UGX {formatMoney(selectedHistory.shortageCounter?.recovered)}</strong></div>
                 <div><span>Outstanding shortage</span><strong className={Number(selectedHistory.shortageCounter?.outstanding || 0) > 0 ? "debt" : "settled-value"}>UGX {formatMoney(selectedHistory.shortageCounter?.outstanding)}</strong></div>
                 <div><span>Effective working capital</span><strong>UGX {formatMoney(Math.max(Number(selectedHistory.balance.operating_capital || 0) - Number(selectedHistory.shortageCounter?.outstanding || 0), 0))}</strong></div>

@@ -75,6 +75,35 @@ export async function getTillBalancingContext(req, res, next) {
       [tillId]
     );
 
+    const branchWorkersResult = await pool.query(
+      `SELECT DISTINCT e.id, e.name
+       FROM employees e
+       WHERE EXISTS (
+         SELECT 1 FROM branch_employees be WHERE be.branch_id=$1 AND be.employee_id=e.id
+       ) OR EXISTS (
+         SELECT 1 FROM till_assignments ta
+         JOIN tills assigned_till ON assigned_till.id=ta.till_id
+         WHERE assigned_till.branch_id=$1 AND ta.employee_id=e.id
+           AND ta.started_at <= NOW() AND (ta.ended_at IS NULL OR ta.ended_at > NOW())
+       )
+       ORDER BY e.name,e.id`,
+      [tillResult.rows[0].branch_id]
+    );
+
+    const carriedResponsibilitiesResult = await pool.query(
+      `SELECT r.employee_id,COALESCE(e.name,r.note) AS employee_name,
+              GREATEST(r.amount-COALESCE(SUM(p.amount),0),0)::NUMERIC(18,2) AS balance
+       FROM branch_shortage_responsibilities r
+       LEFT JOIN employees e ON e.id=r.employee_id
+       LEFT JOIN branch_shortage_responsibility_payments p
+         ON p.responsibility_id=r.id AND p.payment_date <= $2
+       WHERE r.till_id=$1 AND r.responsibility_date <= $2
+       GROUP BY r.id,e.id,e.name
+       HAVING GREATEST(r.amount-COALESCE(SUM(p.amount),0),0)>0
+       ORDER BY e.name,r.id`,
+      [tillId,businessDate]
+    );
+
     const terminalsResult = await pool.query(
       `SELECT tt.id AS assignment_id,
               t.id AS terminal_id,
@@ -112,6 +141,10 @@ export async function getTillBalancingContext(req, res, next) {
     res.json({
       till: tillResult.rows[0],
       attendant: employeeResult.rows[0] || null,
+      branchWorkers: branchWorkersResult.rows.map((row) => ({ id: Number(row.id), name: row.name })),
+      carriedResponsibilities: carriedResponsibilitiesResult.rows.map((row) => ({
+        employeeId: Number(row.employee_id), employeeName: row.employee_name, balance: Number(row.balance || 0),
+      })),
       terminals: terminalsResult.rows,
       dailyTransactions: terminalsResult.rows.map((terminal) => ({
         terminal_id: terminal.terminal_id,
@@ -138,11 +171,12 @@ export async function createTillBalance(req, res, next) {
     const cashItems = Array.isArray(req.body.cashItems) ? req.body.cashItems : [];
     const floatBalances = Array.isArray(req.body.floatBalances) ? req.body.floatBalances : [];
     const transactionCounts = Array.isArray(req.body.transactionCounts) ? req.body.transactionCounts : [];
+    const responsibilities = Array.isArray(req.body.preBalanceResponsibilities) ? req.body.preBalanceResponsibilities : [];
 
     await client.query("BEGIN");
 
     const tillResult = await client.query(
-      `SELECT id, operating_capital, status
+      `SELECT id, branch_id, operating_capital, status
        FROM tills
        WHERE id = $1
        FOR UPDATE`,
@@ -171,6 +205,33 @@ export async function createTillBalance(req, res, next) {
       const error = new Error("No active employee is assigned to this Till."); error.statusCode = 400; throw error;
     }
     const employee = employeeResult.rows[0];
+
+    const normalizedResponsibilities = [];
+    for (const entry of responsibilities) {
+      const responsibilityAmount = money(entry.amount, "Responsibility amount");
+      const note = String(entry.note || "").trim();
+      if (responsibilityAmount <= 0) {
+        const error = new Error("Each assigned responsibility must be greater than zero."); error.statusCode = 400; throw error;
+      }
+      if (!note) {
+        const error = new Error("Enter an event or reason for each Missing Funds item."); error.statusCode = 400; throw error;
+      }
+      normalizedResponsibilities.push({ amount: responsibilityAmount, note });
+    }
+    const newResponsibilityAmount = Number(normalizedResponsibilities.reduce((sum, entry) => sum + entry.amount, 0).toFixed(2));
+    const carriedResponsibilitiesResult = await client.query(
+      `SELECT COALESCE(SUM(GREATEST(r.amount-COALESCE(paid.amount,0),0)),0)::NUMERIC(18,2) AS amount
+       FROM branch_shortage_responsibilities r
+       LEFT JOIN LATERAL (
+         SELECT COALESCE(SUM(p.amount),0)::NUMERIC(18,2) AS amount
+         FROM branch_shortage_responsibility_payments p
+         WHERE p.responsibility_id=r.id AND p.payment_date <= $2
+       ) paid ON TRUE
+       WHERE r.till_id=$1 AND r.responsibility_date <= $2`,
+      [tillId,businessDate]
+    );
+    const carriedResponsibilityOffset = Number(carriedResponsibilitiesResult.rows[0]?.amount || 0);
+    const responsibilityOffset = Number((carriedResponsibilityOffset + newResponsibilityAmount).toFixed(2));
 
     let totalCash = 0;
     const normalizedCash = [];
@@ -233,57 +294,53 @@ export async function createTillBalance(req, res, next) {
 
     const operatingCapital = Number(till.operating_capital || 0);
     const actualTillCapital = totalCash + totalFloat;
-    const difference = actualTillCapital - operatingCapital;
+    const rawDifference = actualTillCapital - operatingCapital;
+    const difference = Number((rawDifference + responsibilityOffset).toFixed(2));
     const status = difference < 0 ? "SHORT" : difference > 0 ? "EXCESS" : "BALANCED";
 
     const currentShortage = difference < 0 ? Math.abs(difference) : 0;
-    // The observed Till shortage is a snapshot of the shortage still present,
-    // not automatically a new shortage on every balancing. Compare it with
-    // the Till's existing unpaid liabilities as of this business date. Linked
-    // outside-Till responsibilities retain the source Till liability; only
-    // their repayments reduce that source total. Separate responsibilities
-    // tied to this Till are included as well.
-    const outstandingResult = await client.query(
-      `WITH till_events AS (
-         SELECT p.till_balance_id,p.shortage,
-                COALESCE(SUM(a.amount) FILTER (WHERE bsp.id IS NOT NULL),0)::NUMERIC(18,2) AS till_recovered
-         FROM till_shortage_event_positions p
-         LEFT JOIN till_shortage_settlement_allocations a ON a.till_balance_id=p.till_balance_id
-         LEFT JOIN branch_shortage_payments bsp ON bsp.id=a.payment_id AND bsp.payment_date <= $2
-         WHERE p.till_id=$1 AND p.business_date <= $2
-         GROUP BY p.till_balance_id,p.shortage
-       ), reassigned_payments AS (
-         SELECT COALESCE(SUM(paid.amount),0)::NUMERIC(18,2) AS amount
-         FROM branch_shortage_responsibilities r
-         JOIN (SELECT DISTINCT responsibility_id FROM branch_shortage_responsibility_allocations) allocated
-           ON allocated.responsibility_id=r.id
-         LEFT JOIN LATERAL (
-           SELECT SUM(rp.amount)::NUMERIC(18,2) AS amount
-           FROM branch_shortage_responsibility_payments rp
-           WHERE rp.responsibility_id=r.id AND rp.payment_date <= $2
-         ) paid ON TRUE
-         WHERE r.till_id=$1 AND r.responsibility_date <= $2
-       ), separate_responsibilities AS (
-         SELECT COALESCE(SUM(GREATEST(r.amount-COALESCE(paid.amount,0),0)),0)::NUMERIC(18,2) AS outstanding
-         FROM branch_shortage_responsibilities r
-         LEFT JOIN LATERAL (
-           SELECT SUM(rp.amount)::NUMERIC(18,2) AS amount
-           FROM branch_shortage_responsibility_payments rp
-           WHERE rp.responsibility_id=r.id AND rp.payment_date <= $2
-         ) paid ON TRUE
-         WHERE r.till_id=$1 AND r.till_balance_id IS NULL AND r.responsibility_date <= $2
-           AND NOT EXISTS (
-             SELECT 1 FROM branch_shortage_responsibility_allocations ra WHERE ra.responsibility_id=r.id
-           )
-       )
-       SELECT (GREATEST(COALESCE(SUM(GREATEST(shortage-till_recovered,0)),0)
-                        - (SELECT amount FROM reassigned_payments),0)
-               + (SELECT outstanding FROM separate_responsibilities))::NUMERIC(18,2) AS outstanding
-       FROM till_events`,
+    // Compare the net Till shortage with unpaid and still-unassigned historical
+    // Till events. Current review assignments first move liability off the
+    // Till attendant, then any remaining net variance is recorded on the Till.
+    const priorEventsResult = await client.query(
+      `SELECT p.till_balance_id,p.shortage,
+              GREATEST(p.shortage-COALESCE(recovered.amount,0)-COALESCE(assigned.amount,0),0)::NUMERIC(18,2) AS available
+       FROM till_shortage_event_positions p
+       LEFT JOIN LATERAL (
+         SELECT COALESCE(SUM(a.amount),0)::NUMERIC(18,2) AS amount
+         FROM till_shortage_settlement_allocations a
+         JOIN branch_shortage_payments payment ON payment.id=a.payment_id
+         WHERE a.till_balance_id=p.till_balance_id AND payment.payment_date <= $2
+       ) recovered ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT COALESCE(SUM(a.amount),0)::NUMERIC(18,2) AS amount
+         FROM branch_shortage_responsibility_allocations a
+         JOIN branch_shortage_responsibilities r ON r.id=a.responsibility_id
+         WHERE a.till_balance_id=p.till_balance_id AND r.responsibility_date <= $2
+       ) assigned ON TRUE
+       WHERE p.till_id=$1 AND p.business_date <= $2
+       ORDER BY p.business_date,p.till_balance_id`,
       [tillId,businessDate]
     );
-    const previousOutstanding = Number(outstandingResult.rows[0]?.outstanding || 0);
-    const shortageEventAmount = Number(Math.max(currentShortage-previousOutstanding,0).toFixed(2));
+    const priorEvents = priorEventsResult.rows.map((row) => ({
+      tillBalanceId: Number(row.till_balance_id), available: Number(row.available || 0),
+    })).filter((event) => event.available > 0);
+    const previousOutstanding = Number(priorEvents.reduce((sum, event) => sum + event.available, 0).toFixed(2));
+    const responsibilityEventAllocations = [];
+    for (const responsibility of normalizedResponsibilities) {
+      let remaining = responsibility.amount;
+      for (const event of priorEvents) {
+        if (!remaining || !event.available) continue;
+        const amount = Math.min(remaining,event.available);
+        responsibilityEventAllocations.push({ responsibilityIndex: normalizedResponsibilities.indexOf(responsibility), tillBalanceId: event.tillBalanceId, amount });
+        event.available = Number((event.available-amount).toFixed(2));
+        remaining = Number((remaining-amount).toFixed(2));
+      }
+    }
+    const remainingPriorOutstanding = Number(priorEvents.reduce((sum, event) => sum + event.available, 0).toFixed(2));
+    // Add only the net shortfall not already represented by older, still-open
+    // Till liability after assignments made in this review.
+    const shortageEventAmount = Number(Math.max(currentShortage-remainingPriorOutstanding,0).toFixed(2));
 
     // Keep excess handling unchanged for now. Excess does not participate in
     // the shortage/recovery event ledger.
@@ -308,19 +365,39 @@ export async function createTillBalance(req, res, next) {
       `INSERT INTO till_balances
        (till_id, employee_id, business_date, balanced_at, operating_capital,
         total_cash, total_float, actual_till_capital, difference, status,
-        shortage_event_amount, excess_event_amount)
-       VALUES ($1, $2, $3, NOW(), $4, $5, $6, $7, $8, $9, $10, $11)
+        shortage_event_amount, excess_event_amount, gross_difference, responsibility_offset_amount, new_responsibility_amount)
+       VALUES ($1, $2, $3, NOW(), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
        RETURNING id, till_id, employee_id, business_date, balanced_at,
                  operating_capital, total_cash, total_float,
                  actual_till_capital, difference, status,
-                 shortage_event_amount, excess_event_amount`,
+                 shortage_event_amount, excess_event_amount, gross_difference, responsibility_offset_amount, new_responsibility_amount`,
       [
         tillId, employee.id, businessDate, operatingCapital, totalCash,
         totalFloat, actualTillCapital, difference, status,
-        shortageEventAmount, excessEventAmount,
+        shortageEventAmount, excessEventAmount, rawDifference, responsibilityOffset, newResponsibilityAmount,
       ]
     );
     const balance = balanceResult.rows[0];
+
+    const responsibilityIds = [];
+    for (const entry of normalizedResponsibilities) {
+      const insertedResponsibility = await client.query(
+        `INSERT INTO branch_shortage_responsibilities
+           (branch_id,employee_id,till_id,till_balance_id,amount,responsibility_date,note,created_by)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+         RETURNING id`,
+        [till.branch_id, null, tillId, balance.id, entry.amount, businessDate, entry.note, req.user?.id || null]
+      );
+      responsibilityIds.push(Number(insertedResponsibility.rows[0].id));
+    }
+    for (const allocation of responsibilityEventAllocations) {
+      const responsibilityId = responsibilityIds[allocation.responsibilityIndex];
+      await client.query(
+        `INSERT INTO branch_shortage_responsibility_allocations(responsibility_id,till_balance_id,amount)
+         VALUES($1,$2,$3)`,
+        [responsibilityId,allocation.tillBalanceId,allocation.amount]
+      );
+    }
 
     for (const item of normalizedCash) {
       await client.query(
@@ -368,6 +445,10 @@ export async function createTillBalance(req, res, next) {
         observedShortage: currentShortage,
         previousShortage: previousOutstanding,
       },
+      responsibilityOffset,
+      carriedResponsibilityOffset,
+      newResponsibilityAmount,
+      grossDifference: rawDifference,
       excessEvent: {
         newExcess: excessEventAmount,
         observedExcess: currentExcess,
@@ -457,6 +538,31 @@ export async function getTillShortagePosition(req, res, next) {
       [tillId, date]
     );
 
+    const missingFundsResult = await pool.query(
+      `SELECT r.id,r.amount,r.responsibility_date::text AS business_date,r.note,
+              COALESCE(SUM(p.amount) FILTER (WHERE p.payment_date <= $2),0)::NUMERIC(18,2) AS recovered,
+              COALESCE(SUM(p.amount) FILTER (WHERE p.payment_date = $2),0)::NUMERIC(18,2) AS recovered_today
+       FROM branch_shortage_responsibilities r
+       LEFT JOIN branch_shortage_responsibility_payments p ON p.responsibility_id=r.id
+       WHERE r.till_id=$1 AND r.employee_id IS NULL AND r.responsibility_date <= $2
+       GROUP BY r.id
+       HAVING GREATEST(r.amount-COALESCE(SUM(p.amount) FILTER (WHERE p.payment_date <= $2),0),0)>0
+           OR COALESCE(SUM(p.amount) FILTER (WHERE p.payment_date = $2),0)>0
+       ORDER BY r.responsibility_date DESC,r.id DESC`,
+      [tillId,date]
+    );
+
+    const excessEventsResult = await pool.query(
+      `SELECT tb.id,tb.business_date::text AS business_date,tb.excess_event_amount,
+              e.name AS employee_name,t.name AS till_name
+       FROM till_balances tb
+       JOIN employees e ON e.id=tb.employee_id
+       JOIN tills t ON t.id=tb.till_id
+       WHERE tb.till_id=$1 AND tb.business_date <= $2 AND tb.excess_event_amount > 0
+       ORDER BY tb.business_date DESC,tb.balanced_at DESC,tb.id DESC`,
+      [tillId,date]
+    );
+
     const events = eventsResult.rows.map((event) => ({
       tillBalanceId: Number(event.till_balance_id),
       employeeId: Number(event.employee_id),
@@ -483,6 +589,14 @@ export async function getTillShortagePosition(req, res, next) {
     const shortageIncurred = events.reduce((sum, event) => sum + event.shortage, 0);
     const paymentsToDate = events.reduce((sum, event) => sum + event.recovered, 0);
     const outstanding = events.reduce((sum, event) => sum + event.outstanding, 0);
+    const excessEvents = excessEventsResult.rows.map((event) => ({
+      tillBalanceId: Number(event.id),
+      businessDate: event.business_date,
+      employeeName: event.employee_name,
+      tillName: event.till_name,
+      amount: Number(event.excess_event_amount || 0),
+    }));
+    const excessIncurred = excessEvents.reduce((sum, event) => sum + event.amount, 0);
     const attendant = attendantResult.rows[0] || null;
 
     res.json({
@@ -492,11 +606,22 @@ export async function getTillShortagePosition(req, res, next) {
       currentEmployeeId: attendant ? Number(attendant.employee_id) : null,
       currentEmployeeName: attendant?.employee_name || "",
       shortageIncurred,
+      excessIncurred,
       paymentsToDate,
       outstanding,
       asOfDate: date,
       events,
+      excessEvents,
       payments,
+      missingFunds: missingFundsResult.rows.map((item) => ({
+        responsibilityId: Number(item.id),
+        eventName: item.note || "Missing funds",
+        businessDate: item.business_date,
+        amount: Number(item.amount || 0),
+        recovered: Number(item.recovered || 0),
+        recoveredToday: Number(item.recovered_today || 0),
+        outstanding: Math.max(Number(item.amount || 0) - Number(item.recovered || 0), 0),
+      })),
     });
   } catch (error) {
     next(error);
@@ -660,7 +785,7 @@ export async function listTillBalances(req, res, next) {
       `SELECT tb.id, tb.till_id, tb.employee_id, e.name AS employee_name,
               tb.business_date::text AS business_date, tb.balanced_at, tb.operating_capital,
               tb.total_cash, tb.total_float, tb.actual_till_capital,
-              tb.difference, tb.status
+              tb.difference, tb.gross_difference, tb.excess_event_amount, tb.responsibility_offset_amount, tb.new_responsibility_amount, tb.status
        FROM till_balances tb
        JOIN employees e ON e.id = tb.employee_id
        WHERE tb.till_id = $1
@@ -680,7 +805,7 @@ export async function getTillBalanceDetails(req, res, next) {
       `SELECT tb.id, tb.till_id, t.name AS till_name, tb.employee_id, e.name AS employee_name,
               tb.business_date::text AS business_date, tb.balanced_at, tb.operating_capital,
               tb.total_cash, tb.total_float, tb.actual_till_capital,
-              tb.difference, tb.status
+              tb.difference, tb.gross_difference, tb.excess_event_amount, tb.responsibility_offset_amount, tb.new_responsibility_amount, tb.status
        FROM till_balances tb
        JOIN tills t ON t.id = tb.till_id
        JOIN employees e ON e.id = tb.employee_id
@@ -790,6 +915,7 @@ export async function getTillBalanceDetails(req, res, next) {
       shortageCounter: {
         asOfDate: historicalDate,
         shortageIncurred,
+        excess: Number(balanceResult.rows[0].excess_event_amount || 0),
         recovered: shortageRecovered,
         outstanding: shortageOutstanding,
         events: shortageEvents,

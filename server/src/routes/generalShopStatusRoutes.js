@@ -1,17 +1,10 @@
 import { Router } from "express";
 import { requireBranchAccess, requireSupervisorAccess } from "../middleware/auth.js";
-import { getGeneralShopStatus, saveGeneralShopStatus, recordShortagePayment, listBranchShortageEmployees, listAssignableTillShortages, listAvailableBranchEmployees, assignEmployeeToBranch, recordExternalShortageResponsibility, recordExternalShortagePayment } from "../controllers/generalShopStatusController.js";
+import { getGeneralShopStatus, saveGeneralShopStatus } from "../controllers/generalShopStatusController.js";
 import { emailGeneralShopStatus, generateGeneralShopStatusPdf } from "../controllers/generalShopStatusEmailController.js";
 const router=Router();
 router.get("/general-shop-status",requireSupervisorAccess,requireBranchAccess,getGeneralShopStatus);
 router.put("/general-shop-status",requireSupervisorAccess,requireBranchAccess,saveGeneralShopStatus);
-router.post("/branch-shortages/payments",requireSupervisorAccess,requireBranchAccess,recordShortagePayment);
-router.get("/branch-shortages/employees",requireSupervisorAccess,requireBranchAccess,listBranchShortageEmployees);
-router.get("/branch-shortages/assignable-till-events",requireSupervisorAccess,requireBranchAccess,listAssignableTillShortages);
-router.get("/branch-shortages/available-employees",requireSupervisorAccess,requireBranchAccess,listAvailableBranchEmployees);
-router.post("/branch-shortages/branch-workers",requireSupervisorAccess,requireBranchAccess,assignEmployeeToBranch);
-router.post("/branch-shortages/responsibilities",requireSupervisorAccess,requireBranchAccess,recordExternalShortageResponsibility);
-router.post("/branch-shortages/responsibilities/:responsibilityId/payments",requireSupervisorAccess,requireBranchAccess,recordExternalShortagePayment);
 router.post("/general-shop-status/email-report",requireSupervisorAccess,requireBranchAccess,emailGeneralShopStatus);
 router.get("/general-shop-status/pdf",requireSupervisorAccess,requireBranchAccess,generateGeneralShopStatusPdf);
 export default router;

@@ -6,7 +6,6 @@ import TerminalManagement from "./components/TerminalManagement";
 import TillBalancing from "./components/TillBalancing";
 import GeneralShopStatus from "./components/GeneralShopStatus";
 import BranchStatus from "./components/BranchStatus";
-import BranchShortageCounter from "./components/BranchShortageCounter";
 import CashBook from "./components/CashBook";
 import MasterData from "./components/MasterData";
 import UserManagement from "./components/UserManagement";
@@ -34,9 +33,9 @@ function App() {
   const manager = user.role === "MANAGER";
   const supervisor = user.role === "SUPERVISOR";
   const allowed = manager
-    ? [["master-data", "Master Data"], ["terminals", "Terminal Management"], ["balancing", "Till Balancing"], ["shop-status", "General Shop Status"], ["branch-status", "Branch Status"], ["shortage-counter", "Shortage Counter"], ["daily-inputs", "Supervisor Daily Inputs"], ["cash-book", "Cash Book"], ["users", "User Management"]]
+    ? [["master-data", "Master Data"], ["terminals", "Terminal Management"], ["balancing", "Till Balancing"], ["shop-status", "General Shop Status"], ["branch-status", "Branch Status"], ["daily-inputs", "Supervisor Daily Inputs"], ["cash-book", "Cash Book"], ["users", "User Management"]]
     : supervisor
-      ? [["balancing", "Till Balancing"], ["branch-status", "Branch Status"], ["shortage-counter", "Shortage Counter"], ["daily-inputs", "Supervisor Daily Inputs"], ["cash-book", "Cash Book"]]
+      ? [["balancing", "Till Balancing"], ["branch-status", "Branch Status"], ["daily-inputs", "Supervisor Daily Inputs"], ["cash-book", "Cash Book"]]
       : [["balancing", "Till Balancing"]];
 
   const activePage = allowed.some(([id]) => id === page) ? page : allowed[0][0];
@@ -58,8 +57,7 @@ function App() {
       : activePage === "terminals" ? <TerminalManagement />
         : activePage === "shop-status" && manager ? <GeneralShopStatus user={user} />
           : activePage === "branch-status" ? <BranchStatus user={user} />
-            : activePage === "shortage-counter" ? <BranchShortageCounter user={user} />
-              : activePage === "daily-inputs" ? <SupervisorDailyInputs user={user} />
+          : activePage === "daily-inputs" ? <SupervisorDailyInputs user={user} />
                 : activePage === "cash-book" ? <CashBook user={user} />
                   : activePage === "users" ? <UserManagement currentUser={user} />
                     : <MasterData />}

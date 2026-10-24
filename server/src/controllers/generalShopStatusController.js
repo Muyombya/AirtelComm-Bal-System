@@ -127,12 +127,20 @@ async function getShortageSummary(client, branchId, date) {
        SELECT r.id AS till_balance_id,
               r.employee_id,
               e.name AS employee_name,
-              'Outside Till' AS till_name,
+              COALESCE(source_till.name,'Outside Till') AS till_name,
               r.responsibility_date AS business_date,
-              r.amount AS shortage,
+              CASE WHEN reassignment.allocation_count > 0 AND r.till_balance_id IS NULL
+                   THEN reassignment.allocated_amount ELSE r.amount END AS shortage,
               'external'::TEXT AS source
        FROM branch_shortage_responsibilities r
        JOIN employees e ON e.id=r.employee_id
+       LEFT JOIN tills source_till ON source_till.id=r.till_id
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*)::INT AS allocation_count,
+                COALESCE(SUM(a.amount),0)::NUMERIC(18,2) AS allocated_amount
+         FROM branch_shortage_responsibility_allocations a
+         WHERE a.responsibility_id=r.id
+       ) reassignment ON TRUE
        WHERE r.branch_id=$1
          AND r.responsibility_date <= $2
      ),
@@ -334,8 +342,13 @@ export async function recordExternalShortageResponsibility(req, res, next) {
          JOIN branch_shortage_responsibilities r ON r.id=a.responsibility_id
          WHERE a.till_balance_id=$1 AND r.responsibility_date <= $2`, [tillBalanceId,responsibilityDate]
       );
-      const available = Number(event.rows[0].outstanding)-Number(assigned.rows[0].total||0);
-      if (responsibilityAmount > available) { const e = new Error(`Amount exceeds the unassigned unpaid Till shortage of UGX ${Math.max(available,0).toLocaleString("en-UG")}.`); e.statusCode = 400; throw e; }
+      const available = Math.max(Number(event.rows[0].outstanding)-Number(assigned.rows[0].total||0), 0);
+      if (responsibilityAmount > available) {
+        const excess = responsibilityAmount - available;
+        const e = new Error(`This assignment exceeds the available Till shortage by UGX ${excess.toLocaleString("en-UG")}. Maximum assignable: UGX ${available.toLocaleString("en-UG")}.`);
+        e.statusCode = 400;
+        throw e;
+      }
     }
     const transferMode = String(req.body.reassignExistingTillShortage || (tillBalanceId ? true : false)) === "true";
     const allocations = [];
@@ -363,9 +376,7 @@ export async function recordExternalShortageResponsibility(req, res, next) {
         if (!remaining) break;
       }
       if (remaining > 0) {
-        const message = tillBalanceId
-          ? "The selected Till event does not have enough unassigned outstanding shortage."
-          : "The amount exceeds the source Till's unassigned outstanding shortage.";
+        const message = `This assignment exceeds the source Till's available shortage by UGX ${remaining.toLocaleString("en-UG")}. Reduce the amount before saving.`;
         const e = new Error(message); e.statusCode = 400; throw e;
       }
     }
@@ -383,7 +394,13 @@ export async function recordExternalShortageResponsibility(req, res, next) {
       );
     }
     await client.query("COMMIT");
-    res.status(201).json({ message: "Outside-Till responsibility recorded.", responsibility: inserted.rows[0] });
+    res.status(201).json({
+      message: allocations.length
+        ? "Shortage reassigned. The source Till attendant's responsibility has been reduced by the transferred amount."
+        : "Separate outside-Till responsibility recorded.",
+      responsibility: inserted.rows[0],
+      transferredAmount: allocations.reduce((sum, allocation) => sum + Number(allocation.amount || 0), 0),
+    });
   } catch (e) { await client.query("ROLLBACK").catch(() => {}); next(e); }
   finally { client.release(); }
 }
@@ -437,6 +454,46 @@ export async function recordExternalShortagePayment(req, res, next) {
   finally { client.release(); }
 }
 
+export async function recordTillMissingFundsPayment(req, res, next) {
+  const client = await pool.connect();
+  try {
+    const tillId = positiveId(req.params.tillId, "Till ID");
+    const responsibilityId = positiveId(req.params.responsibilityId, "Missing-funds event ID");
+    const requestedDate = businessDate(req.body.paymentDate || new Date().toISOString().slice(0, 10));
+    const paymentAmount = amount(req.body.amount, "Payment amount");
+    const note = String(req.body.note || "").trim();
+    await client.query("BEGIN");
+    const event = await client.query(
+      `SELECT r.id,r.branch_id,r.amount,r.responsibility_date,t.id AS till_id
+       FROM branch_shortage_responsibilities r
+       JOIN tills t ON t.id=r.till_id
+       WHERE r.id=$1 AND r.till_id=$2 AND r.employee_id IS NULL
+       FOR UPDATE OF r,t`,
+      [responsibilityId,tillId]
+    );
+    if (!event.rowCount) { const error=new Error("Missing-funds event was not found for this Till."); error.statusCode=404; throw error; }
+    const row=event.rows[0];
+    const eventDate=databaseDate(row.responsibility_date);
+    const paymentDate=requestedDate < eventDate ? eventDate : requestedDate;
+    const paid=await client.query(
+      `SELECT COALESCE(SUM(amount),0)::NUMERIC(18,2) AS total
+       FROM branch_shortage_responsibility_payments WHERE responsibility_id=$1`,
+      [responsibilityId]
+    );
+    const outstanding=Math.max(Number(row.amount)-Number(paid.rows[0]?.total||0),0);
+    if (paymentAmount>outstanding) { const error=new Error(`Payment exceeds the missing-funds balance of UGX ${outstanding.toLocaleString("en-UG")}.`); error.statusCode=400; throw error; }
+    const inserted=await client.query(
+      `INSERT INTO branch_shortage_responsibility_payments(responsibility_id,amount,payment_date,note,created_by)
+       VALUES($1,$2,$3,$4,$5)
+       RETURNING id,responsibility_id,amount,payment_date,note,created_at`,
+      [responsibilityId,paymentAmount,paymentDate,note||null,req.user?.id||null]
+    );
+    await client.query("COMMIT");
+    res.status(201).json({ message:"Missing-funds settlement recorded.", payment:inserted.rows[0], branchId:Number(row.branch_id) });
+  } catch (error) { await client.query("ROLLBACK").catch(()=>{}); next(error); }
+  finally { client.release(); }
+}
+
 export async function getGeneralShopStatus(req, res, next) {
   try {
     const branchId = positiveId(req.query.branchId || 1, "Branch ID");
@@ -453,7 +510,7 @@ export async function getGeneralShopStatus(req, res, next) {
       `SELECT DISTINCT ON (tb.till_id)
           tb.id,tb.till_id,tb.employee_id,t.name AS till_name,e.name AS attendant_name,
           tb.business_date,tb.balanced_at,tb.operating_capital,
-          tb.total_cash,tb.total_float,tb.actual_till_capital,tb.difference,tb.status
+          tb.total_cash,tb.total_float,tb.actual_till_capital,tb.difference,tb.gross_difference,tb.status
        FROM till_balances tb
        JOIN tills t ON t.id=tb.till_id JOIN employees e ON e.id=tb.employee_id
        WHERE t.branch_id=$1 AND tb.business_date=$2
@@ -499,6 +556,14 @@ export async function getGeneralShopStatus(req, res, next) {
     );
 
     const shortageRows = await getShortageSummary(pool, branchId, date);
+    const dailyExcesses = balances.rows
+      .filter((row) => Number(row.gross_difference ?? row.difference ?? 0) > 0)
+      .map((row) => ({
+        tillBalanceId: Number(row.id),
+        tillName: row.till_name,
+        employeeName: row.attendant_name,
+        amount: Number(row.gross_difference ?? row.difference ?? 0),
+      }));
     const shortagePayments = await pool.query(
       `SELECT bsp.id, bsp.till_id, t.name AS till_name, bsp.employee_id, e.name AS employee_name, bsp.amount, bsp.payment_date, bsp.note, bsp.created_at
        FROM branch_shortage_payments bsp
@@ -509,16 +574,22 @@ export async function getGeneralShopStatus(req, res, next) {
        LIMIT 100`, [branchId,date]
     );
     const externalShortages = await pool.query(
-      `SELECT r.id,r.employee_id,e.name AS employee_name,r.till_id,t.name AS till_name,
-              r.till_balance_id,source.source_attendants,r.amount,r.responsibility_date,r.note,
+      `SELECT r.id,r.employee_id,COALESCE(e.name,r.note) AS employee_name,r.till_id,t.name AS till_name,
+              r.till_balance_id,source.source_attendants,origin_attendant.name AS balance_attendant_name,
+              CASE WHEN source.allocation_count > 0 AND r.till_balance_id IS NULL THEN source.allocated_amount ELSE r.amount END AS amount,
+              r.responsibility_date,r.note,
               COALESCE(SUM(p.amount),0)::NUMERIC(18,2) AS paid_to_date,
               COALESCE(SUM(p.amount) FILTER (WHERE p.payment_date=$2),0)::NUMERIC(18,2) AS paid_today,
-              GREATEST(r.amount-COALESCE(SUM(p.amount),0),0)::NUMERIC(18,2) AS balance
+              GREATEST(CASE WHEN source.allocation_count > 0 AND r.till_balance_id IS NULL THEN source.allocated_amount ELSE r.amount END-COALESCE(SUM(p.amount),0),0)::NUMERIC(18,2) AS balance
        FROM branch_shortage_responsibilities r
-       JOIN employees e ON e.id=r.employee_id
+       LEFT JOIN employees e ON e.id=r.employee_id
        LEFT JOIN tills t ON t.id=r.till_id
+       LEFT JOIN till_balances origin_balance ON origin_balance.id=r.till_balance_id
+       LEFT JOIN employees origin_attendant ON origin_attendant.id=origin_balance.employee_id
        LEFT JOIN LATERAL (
          SELECT STRING_AGG(DISTINCT source_employee.name, ', ' ORDER BY source_employee.name) AS source_attendants
+                ,COUNT(DISTINCT allocation.till_balance_id)::INT AS allocation_count
+                ,COALESCE(SUM(allocation.amount),0)::NUMERIC(18,2) AS allocated_amount
          FROM branch_shortage_responsibility_allocations allocation
          JOIN till_balances source_balance ON source_balance.id=allocation.till_balance_id
          JOIN employees source_employee ON source_employee.id=source_balance.employee_id
@@ -527,11 +598,36 @@ export async function getGeneralShopStatus(req, res, next) {
        LEFT JOIN branch_shortage_responsibility_payments p
          ON p.responsibility_id=r.id AND p.payment_date <= $2
        WHERE r.branch_id=$1 AND r.responsibility_date <= $2
-       GROUP BY r.id,e.id,e.name,t.name,source.source_attendants
-       HAVING r.amount-COALESCE(SUM(p.amount),0)>0
+       GROUP BY r.id,e.id,e.name,t.name,source.source_attendants,source.allocation_count,source.allocated_amount,origin_attendant.name
+       HAVING CASE WHEN source.allocation_count > 0 AND r.till_balance_id IS NULL THEN source.allocated_amount ELSE r.amount END-COALESCE(SUM(p.amount),0)>0
           OR COALESCE(SUM(p.amount) FILTER (WHERE p.payment_date=$2),0)>0
        ORDER BY r.responsibility_date DESC,r.id DESC`, [branchId,date]
     );
+    const missingFundRows = externalShortages.rows.filter((row) => row.employee_id == null).map((row) => {
+      const balance = Number(row.balance || 0);
+      const paidToday = Number(row.paid_today || 0);
+      const responsibilityDate = databaseDate(row.responsibility_date);
+      return {
+        employeeId: null,
+        eventId: Number(row.id),
+        eventName: row.note || "Missing funds",
+        employee_name: row.note || "Missing funds",
+        name: row.note || "Missing funds",
+        tillName: row.till_name || "",
+        affectedAttendant: row.source_attendants || row.balance_attendant_name || "",
+        totalIncurred: Number(row.amount || 0),
+        // Show the amount outstanding at the start of this business day:
+        // prior balance plus anything newly recorded today. This keeps a
+        // Missing Funds event visible from its creation date through the day
+        // it is fully settled, while `balance` reflects settlement to date.
+        amountOwed: balance + paidToday,
+        newShortage: responsibilityDate === date ? Number(row.amount || 0) : 0,
+        paymentsToday: paidToday,
+        balance,
+        source: "missing-funds",
+      };
+    });
+    shortageRows.push(...missingFundRows);
     // Cash Book Position must mirror the Cash Book module exactly.
     // cash_book_accounts.opening_balance is the branch's original/base opening
     // balance. For a selected business date, the opening balance is the prior
@@ -641,10 +737,18 @@ export async function getGeneralShopStatus(req, res, next) {
     const totalFloat = balances.rows.reduce((s,r)=>s+Number(r.total_float||0),0);
     const branchCapital = totalCash + totalFloat;
     const difference = branchCapital - branchOperatingCapital;
+    // Signed adjustment that reconciles the branch's physical cash/float to
+    // its allocated operating capital. Positive means shortage; negative
+    // means excess. Keep this distinct from the shortage counter's cumulative
+    // outstanding liabilities, which can include balances carried from prior days.
+    const branchImbalance = branchOperatingCapital - branchCapital;
     const effectiveWorkingCapital = Math.max(branchOperatingCapital - totalShortageBalance, 0);
     const adjustedBranchCapital = branchCapital + totalShortageBalance + totalShortagePaid;
     const adjustedDifference = adjustedBranchCapital - branchOperatingCapital;
     const complete = balances.rows.length === tills.rows.length;
+    const missingTills = tills.rows
+      .filter(till => !balances.rows.some(balance => Number(balance.till_id) === Number(till.id)))
+      .map(till => till.name);
     const status = !complete ? "INCOMPLETE" : difference < 0 ? "SHORT" : difference > 0 ? "EXCESS" : "BALANCED";
     const adjustedStatus = !complete ? "INCOMPLETE" : adjustedDifference < 0 ? "SHORT" : adjustedDifference > 0 ? "EXCESS" : "BALANCED";
 
@@ -708,6 +812,7 @@ export async function getGeneralShopStatus(req, res, next) {
 
     const tillShortagePosition = {};
     for (const row of shortageRows) {
+      if (row.employeeId == null) continue;
       tillShortagePosition[row.employeeId] = {
         outstanding: Number(row.balance || 0),
         recovered: Number(row.paymentsToday || 0),
@@ -753,10 +858,11 @@ export async function getGeneralShopStatus(req, res, next) {
         })),
       },
       shortageCounter: shortageRows,
+      dailyExcesses,
       shortagePayments: shortagePayments.rows.map(r => ({ id:Number(r.id), tillId:r.till_id == null ? null : Number(r.till_id), tillName:r.till_name || "", employeeId:Number(r.employee_id), employeeName:r.employee_name, amount:Number(r.amount), paymentDate:r.payment_date, note:r.note || "", createdAt:r.created_at })),
-      externalShortages: externalShortages.rows.map(r => ({ id:Number(r.id), employeeId:Number(r.employee_id), employeeName:r.employee_name, tillId:r.till_id?Number(r.till_id):null, tillName:r.till_name || "", sourceAttendant:r.source_attendants || "", tillBalanceId:r.till_balance_id?Number(r.till_balance_id):null, amount:Number(r.amount), responsibilityDate:r.responsibility_date, note:r.note || "", paidToDate:Number(r.paid_to_date || 0), paidToday:Number(r.paid_today || 0), balance:Number(r.balance || 0) })),
-      totals:{branchOperatingCapital,totalCash,totalFloat,branchCapital,difference,totalShortageBalance,totalShortageAdded,totalShortagePaid,effectiveWorkingCapital,adjustedBranchCapital,adjustedDifference,status,adjustedStatus},
-      balancedTillCount:balances.rows.length,totalTillCount:tills.rows.length,history:history.rows
+      externalShortages: externalShortages.rows.map(r => ({ id:Number(r.id), employeeId:r.employee_id == null ? null : Number(r.employee_id), employeeName:r.employee_name, eventName:r.employee_id == null ? (r.note || "Missing funds") : "", isMissingFunds:r.employee_id == null, tillId:r.till_id?Number(r.till_id):null, tillName:r.till_name || "", sourceAttendant:r.source_attendants || r.balance_attendant_name || "", tillBalanceId:r.till_balance_id?Number(r.till_balance_id):null, amount:Number(r.amount), responsibilityDate:r.responsibility_date, note:r.note || "", paidToDate:Number(r.paid_to_date || 0), paidToday:Number(r.paid_today || 0), balance:Number(r.balance || 0) })),
+      totals:{branchOperatingCapital,totalCash,totalFloat,branchCapital,difference,branchImbalance,totalShortageBalance,totalShortageAdded,totalShortagePaid,effectiveWorkingCapital,adjustedBranchCapital,adjustedDifference,status,adjustedStatus,complete,balancedTillCount:balances.rows.length,totalTillCount:tills.rows.length,missingTills},
+      balancedTillCount:balances.rows.length,totalTillCount:tills.rows.length,missingTills,history:history.rows
     });
   } catch(e){ next(e); }
 }
@@ -766,7 +872,8 @@ export async function saveGeneralShopStatus(req,res,next) {
     const branchId=positiveId(req.body.branchId||1,"Branch ID");
     const date=businessDate(req.body.businessDate);
     const accessoriesCount=count(req.body.accessoriesCount||0,"Accessories");
-    const reason=String(req.body.reason||"").trim();
+    const hasReason=Object.prototype.hasOwnProperty.call(req.body||{},"reason");
+    const reason=hasReason?String(req.body.reason||"").trim():null;
     const totals=await pool.query(
       `SELECT
         (SELECT COALESCE(b.operating_capital,0) FROM branches b WHERE b.id=$1) AS operating_capital,
@@ -784,7 +891,9 @@ export async function saveGeneralShopStatus(req,res,next) {
     const status=Number(balancedCount.rows[0].n)<Number(tillCount.rows[0].n)?"INCOMPLETE":actual-operating<0?"SHORT":actual-operating>0?"EXCESS":"BALANCED";
     await pool.query(`INSERT INTO general_shop_status_entries(branch_id,business_date,accessories_count,reason,updated_at)
       VALUES($1,$2,$3,$4,NOW()) ON CONFLICT(branch_id,business_date)
-      DO UPDATE SET accessories_count=EXCLUDED.accessories_count,reason=EXCLUDED.reason,updated_at=NOW()`, [branchId,date,accessoriesCount,reason||null]);
+      DO UPDATE SET accessories_count=EXCLUDED.accessories_count,
+        reason=CASE WHEN $5 THEN EXCLUDED.reason ELSE general_shop_status_entries.reason END,
+        updated_at=NOW()`, [branchId,date,accessoriesCount,reason||null,hasReason]);
     res.json({message:"General Shop Status saved successfully.",status});
   } catch(e){next(e);}
 }

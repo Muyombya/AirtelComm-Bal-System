@@ -7,6 +7,19 @@ const money = (value) => `UGX ${Number(value || 0).toLocaleString("en-UG")}`;
 const compactNumber = (value) => Number(value || 0).toLocaleString("en-UG");
 const figureTone = (value, emphasis = "") => Number(value) < 0 ? "negative-figure" : emphasis;
 
+function shortageRowTitle(item) {
+  return item.eventName || item.employee_name || item.employeeName || item.name || "—";
+}
+
+function shortageRowDetails(item) {
+  const details = [];
+  const tillName = item.tillName || item.till_names;
+  const attendant = item.affectedAttendant || (item.source === "excess-offset" ? item.employeeName : "");
+  if (attendant) details.push(`Attendant: ${attendant}`);
+  if (tillName) details.push(`Till: ${tillName}`);
+  return details.join(" · ");
+}
+
 function providerGroup(name) {
   const normalized = String(name || "").trim().toLocaleLowerCase();
   return ["mtn", "airtel", "master", "roving", "africell", "warid"].some((word) => normalized.includes(word))
@@ -62,7 +75,7 @@ function escapeSvg(value) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[character]);
 }
 
-function createBranchStatusSvg({ branchName, branchTint, date, groups, totals, transactions, cashBook, reason, accessoriesCount, shortages }) {
+function createBranchStatusSvg({ branchName, branchTint, date, groups, totals, transactions, cashBook, accessoriesCount, shortages }) {
   const width = 360;
   const margin = 7;
   const innerWidth = width - margin * 2;
@@ -70,11 +83,12 @@ function createBranchStatusSvg({ branchName, branchTint, date, groups, totals, t
   const mobileRows = groups.mobile || [];
   const bankRows = groups.banks || [];
   const expenses = cashBook.expenses || [];
-  const shortageRows = (shortages || []).filter((item) => Number(item.balance ?? 0) > 0);
+  const shortageRows = (shortages || []).filter((item) => item.source === "excess-offset" || Number(item.balance ?? 0) > 0 || Number(item.paymentsToday ?? item.payments_today ?? 0) > 0);
   const maxProviderRows = Math.max(mobileRows.length, bankRows.length, 1);
+  const branchImbalance = Number(totals.branchImbalance ?? (Number(totals.branchOperatingCapital || 0) - Number(totals.branchCapital || 0)));
   const providerHeight = 53 + maxProviderRows * 13;
   const cashbookHeight = Math.max(87, 75 + expenses.length * 12);
-  const shortageHeight = 18 + 22 + Math.max(shortageRows.length, 1) * 13 + 13;
+  const shortageHeight = 18 + 22 + Math.max(shortageRows.length, 1) * 16 + 13;
   const bottomHeight = Math.max(cashbookHeight, shortageHeight);
   const height = 8 + 30 + providerHeight + 17 + 6 + 43 + 22 + 6 + bottomHeight + 14;
   const shapes = [];
@@ -145,24 +159,23 @@ function createBranchStatusSvg({ branchName, branchTint, date, groups, totals, t
   y += 18;
   const metrics = [
     ["TOTAL CASH", totals.totalCash],
-    ["BRANCH CAPITAL", totals.branchCapital],
-    ["OPERATING CAPITAL", totals.branchOperatingCapital],
-    ["SHORTAGE", totals.totalShortageBalance],
+    ["OPERATING CAPITAL", totals.branchCapital],
+    ["BRANCH CAPITAL", totals.branchOperatingCapital],
+    [branchImbalance < 0 ? "DAILY EXCESS" : branchImbalance > 0 ? "DAILY SHORTAGE" : "DAILY BALANCED", branchImbalance],
   ];
   metrics.forEach(([label, value], index) => {
     const x = margin + 1 + (index % 2) * colWidth;
     const rowY = y + Math.floor(index / 2) * 20;
-    rect(x, rowY, colWidth - 1, 19, label === "SHORTAGE" ? "#fff0ed" : "#f0f5f9", "#d8e0e8", 3);
-    text(x + 5, rowY + 7, label, { size: font.label, weight: 800, color: "#63748a" });
-    text(x + 5, rowY + 15.5, formatAmount(value, true), { size: font.value, weight: 800, color: amountColor(value, label === "SHORTAGE") });
+    const isShortage = label === "DAILY SHORTAGE";
+    const isExcess = label === "DAILY EXCESS";
+    rect(x, rowY, colWidth - 1, 19, isShortage ? "#fff0ed" : isExcess ? "#e3f4eb" : "#f0f5f9", "#d8e0e8", 3);
+    text(x + 5, rowY + 7, label, { size: font.label, weight: 800, color: isShortage ? "#a43525" : isExcess ? "#17663a" : "#63748a" });
+    text(x + 5, rowY + 15.5, formatAmount(value, true), { size: font.value, weight: 800, color: isShortage ? "#b42318" : isExcess ? "#17663a" : "#172a40" });
   });
   y += 43;
   rect(margin + 1, y, innerWidth - 2, 19, "#f7f9fb", "#d8e0e8", 3);
-  text(margin + 6, y + 8, "REASON:", { size: font.label, weight: 800, color: "#63748a" });
-  text(margin + 6, y + 15, fitted(reason || "—", 34), { size: 7, weight: 800, color: "#334155" });
-  line(centerX, y + 3, centerX, y + 16);
-  text(centerX + 6, y + 8, "ACCESSORIES SALES:", { size: font.label, weight: 800, color: "#63748a" });
-  text(centerX + 6, y + 15, formatAmount(accessoriesCount), { size: 7, weight: 800, color: amountColor(accessoriesCount) });
+  text(margin + 6, y + 8, "ACCESSORIES SALES:", { size: font.label, weight: 800, color: "#63748a" });
+  text(width - margin - 8, y + 15, formatAmount(accessoriesCount), { size: 7, weight: 800, color: amountColor(accessoriesCount), anchor: "end" });
 
   y += 24;
   const bottomTop = y;
@@ -209,32 +222,32 @@ function createBranchStatusSvg({ branchName, branchTint, date, groups, totals, t
   const owedX = shortageX + 71;
   const paidX = shortageX + 106;
   const balanceX = shortageX + cardWidth - 3;
-  text(nameX, shortageY + 10, "NAME", { size: shortageFontSize, weight: 800, color: "#63748a" });
+  text(nameX, shortageY + 10, "NAME / EVENT", { size: shortageFontSize, weight: 800, color: "#63748a" });
   text(owedX, shortageY + 10, "OWED", { size: shortageFontSize, weight: 800, color: "#63748a", anchor: "middle" });
   text(paidX, shortageY + 10, "PAID", { size: shortageFontSize, weight: 800, color: "#63748a", anchor: "middle" });
   text(balanceX, shortageY + 10, "BALANCE", { size: shortageFontSize, weight: 800, color: "#63748a", anchor: "end" });
   line(shortageX + 3, shortageY + 13, shortageX + cardWidth - 3, shortageY + 13);
   shortageY += 19;
   shortageRows.forEach((item) => {
-    text(nameX, shortageY + 7, fitted(item.employee_name || item.name || "—", 12), { size: shortageFontSize, weight: 700 });
-    text(owedX, shortageY + 7, formatAmount(item.amountOwed ?? item.amount_owed), { size: shortageFontSize, weight: 700, color: amountColor(item.amountOwed ?? item.amount_owed, true), anchor: "middle" });
-    text(paidX, shortageY + 7, formatAmount(item.paymentsToday ?? item.payments_today), { size: shortageFontSize, weight: 700, anchor: "middle" });
-    text(balanceX, shortageY + 7, formatAmount(item.balance), { size: shortageFontSize, weight: 700, color: amountColor(item.balance, true), anchor: "end" });
-    shortageY += 13;
+    text(nameX, shortageY + 6, fitted(shortageRowTitle(item), 14), { size: shortageFontSize, weight: 700 });
+    const details = shortageRowDetails(item);
+    if (details) text(nameX, shortageY + 13, fitted(details, 28), { size: 4.3, color: "#63748a" });
+    text(owedX, shortageY + 9, formatAmount(item.amountOwed ?? item.amount_owed), { size: shortageFontSize, weight: 700, color: item.source === "excess-offset" ? "#17663a" : amountColor(item.amountOwed ?? item.amount_owed, true), anchor: "middle" });
+    text(paidX, shortageY + 9, formatAmount(item.paymentsToday ?? item.payments_today), { size: shortageFontSize, weight: 700, anchor: "middle" });
+    text(balanceX, shortageY + 9, formatAmount(item.balance), { size: shortageFontSize, weight: 700, color: item.source === "excess-offset" ? "#17663a" : amountColor(item.balance, true), anchor: "end" });
+    shortageY += 16;
   });
   if (!shortageRows.length) {
     text(shortageX + 6, shortageY + 7, "No outstanding shortages", { size: 5.5, color: "#68788a" });
     shortageY += 13;
   }
   line(shortageX + 3, shortageY + 1, shortageX + cardWidth - 3, shortageY + 1, "#aebdcc", 0.8);
-  const totalBalance = Number(totals.totalShortageBalance ?? shortageRows.reduce((sum, item) => sum + Number(item.balance || 0), 0));
-  const totalPaid = Number(totals.totalShortagePaid ?? shortageRows.reduce((sum, item) => sum + Number(item.paymentsToday ?? item.payments_today ?? 0), 0));
-  const totalAdded = Number(totals.totalShortageAdded ?? shortageRows.reduce((sum, item) => sum + Number(item.newShortage ?? item.new_shortage ?? 0), 0));
-  const totalOwed = Math.max(totalBalance + totalPaid - totalAdded, 0);
+  const totalPaid = shortageRows.reduce((sum, item) => sum + Number(item.paymentsToday ?? item.payments_today ?? 0), 0);
+  const totalOwed = shortageRows.reduce((sum, item) => sum + Number(item.amountOwed ?? item.amount_owed ?? 0), 0);
   text(nameX, shortageY + 8, "TOTAL", { size: shortageFontSize, weight: 900 });
-  text(owedX, shortageY + 8, formatAmount(totalOwed), { size: shortageFontSize, weight: 800, color: amountColor(totalOwed, true), anchor: "middle" });
+  text(owedX, shortageY + 8, formatAmount(totalOwed), { size: shortageFontSize, weight: 800, color: totalOwed < 0 ? "#17663a" : amountColor(totalOwed, true), anchor: "middle" });
   text(paidX, shortageY + 8, formatAmount(totalPaid), { size: shortageFontSize, weight: 800, anchor: "middle" });
-  text(balanceX, shortageY + 8, formatAmount(totalBalance), { size: shortageFontSize, weight: 800, color: amountColor(totalBalance, true), anchor: "end" });
+  text(balanceX, shortageY + 8, formatAmount(branchImbalance), { size: shortageFontSize, weight: 800, color: branchImbalance < 0 ? "#17663a" : branchImbalance > 0 ? "#b42318" : "#172a40", anchor: "end" });
 
   y = bottomTop + bottomHeight;
   text(centerX, y + 9, "Figures consolidated across the branch for the selected date.", { size: 5.4, color: "#758397", anchor: "middle" });
@@ -427,10 +440,24 @@ export default function BranchStatus({ user }) {
   }, [positions, transactions]);
 
   const totals = data?.totals || {};
+  const branchImbalance = Number(totals.branchImbalance ?? (Number(totals.branchOperatingCapital || 0) - Number(totals.branchCapital || 0)));
   const cashBook = data?.cashBook || {};
-  // The report payload retains settled workers for daily accounting totals,
-  // but the Branch Shortage Counter itself only lists current debtors.
-  const shortages = (data?.shortageCounter || []).filter((item) => Number(item.balance ?? 0) > 0);
+  const dailyExcesses = data?.dailyExcesses || [];
+  // Excess is a report-only negative adjustment in this same counter. It nets
+  // the displayed balance without creating a false settlement payment.
+  const shortages = [
+    ...(data?.shortageCounter || []).filter((item) => Number(item.balance ?? 0) > 0 || Number(item.paymentsToday ?? item.payments_today ?? 0) > 0),
+    ...dailyExcesses.map((item) => ({
+      source: "excess-offset",
+      eventId: `excess-${item.tillBalanceId}`,
+      eventName: "Excess",
+      tillName: item.tillName,
+      employeeName: item.employeeName,
+      amountOwed: -Number(item.amount || 0),
+      paymentsToday: 0,
+      balance: -Number(item.amount || 0),
+    })),
+  ];
   const branchName = data?.branch?.name || user?.branch_name || "Branch";
 
   const shareBranchStatusImage = async () => {
@@ -446,7 +473,6 @@ export default function BranchStatus({ user }) {
         totals,
         transactions,
         cashBook,
-        reason: data?.reason,
         accessoriesCount: data?.accessoriesCount,
         shortages,
       });
@@ -538,11 +564,10 @@ export default function BranchStatus({ user }) {
 
         <section className="branch-status-capital">
           <div><span>Total Cash</span><strong className={figureTone(totals.totalCash)}>{money(totals.totalCash)}</strong></div>
-          <div><span>Branch Capital</span><strong className={figureTone(totals.branchCapital)}>{money(totals.branchCapital)}</strong></div>
-          <div><span>Operating Capital</span><strong className={figureTone(totals.branchOperatingCapital)}>{money(totals.branchOperatingCapital)}</strong></div>
-          <div className="branch-status-shortage-total"><span>Shortage</span><strong className={figureTone(totals.totalShortageBalance, "shortage-figure")}>{money(totals.totalShortageBalance)}</strong></div>
+          <div><span>Operating Capital</span><strong className={figureTone(totals.branchCapital)}>{money(totals.branchCapital)}</strong></div>
+          <div><span>Branch Capital</span><strong className={figureTone(totals.branchOperatingCapital)}>{money(totals.branchOperatingCapital)}</strong></div>
+          <div className={`branch-status-shortage-total ${branchImbalance < 0 ? "excess" : branchImbalance === 0 ? "balanced" : ""}`}><span>Daily {branchImbalance < 0 ? "Excess" : branchImbalance === 0 ? "Balanced" : "Shortage"}</span><strong>{money(branchImbalance)}</strong></div>
           <div className="branch-status-extra-info">
-            <div className="branch-status-reason"><span>Reason:</span><strong>{data.reason || "—"}</strong></div>
             <div className="branch-status-accessories-info"><span>Accessories Sales:</span><strong className={figureTone(data.accessoriesCount)}>{compactNumber(data.accessoriesCount)}</strong></div>
           </div>
         </section>
@@ -562,10 +587,10 @@ export default function BranchStatus({ user }) {
           </div>
           <div className="branch-status-card branch-status-shortage-card">
             <h3>Branch Shortage Counter</h3>
-            <div className="branch-status-shortage-head"><span>Name</span><span>Amount Owed</span><span>Paid Off</span><span>Balance</span></div>
-            {(shortages || []).map((item) => <div className="branch-status-shortage-row" key={item.employeeId || item.employee_id}><span>{item.employee_name || item.name || "—"}</span><strong className={figureTone(item.amountOwed ?? item.amount_owed, "shortage-figure")}>{compactNumber(item.amountOwed ?? item.amount_owed)}</strong><strong className={figureTone(item.paymentsToday ?? item.payments_today)}>{compactNumber(item.paymentsToday ?? item.payments_today)}</strong><strong className={figureTone(item.balance, "shortage-figure")}>{compactNumber(item.balance)}</strong></div>)}
+            <div className="branch-status-shortage-head"><span>Name / Event</span><span>Amount Owed</span><span>Paid Off</span><span>Balance</span></div>
+            {(shortages || []).map((item) => <div className="branch-status-shortage-row" key={item.source === "excess-offset" ? item.eventId : item.eventId ? `missing-funds-${item.eventId}` : item.employeeId || item.employee_id}><span>{shortageRowTitle(item)}{shortageRowDetails(item) && <small className="branch-status-shortage-context">{shortageRowDetails(item)}</small>}</span><strong className={item.source === "excess-offset" ? "positive-figure" : figureTone(item.amountOwed ?? item.amount_owed, "shortage-figure")}>{compactNumber(item.amountOwed ?? item.amount_owed)}</strong><strong className={figureTone(item.paymentsToday ?? item.payments_today)}>{compactNumber(item.paymentsToday ?? item.payments_today)}</strong><strong className={item.source === "excess-offset" ? "positive-figure" : figureTone(item.balance, "shortage-figure")}>{compactNumber(item.balance)}</strong></div>)}
             {!shortages.length && <div className="branch-status-empty">No outstanding shortages</div>}
-            <div className="branch-status-shortage-row total"><span>Total</span><strong className="shortage-figure">{compactNumber(Math.max(Number(totals.totalShortageBalance || 0) + Number(totals.totalShortagePaid || 0) - Number(totals.totalShortageAdded || 0), 0))}</strong><strong>{compactNumber(totals.totalShortagePaid ?? shortages.reduce((sum, item) => sum + Number(item.paymentsToday ?? item.payments_today ?? 0), 0))}</strong><strong className="shortage-figure">{compactNumber(totals.totalShortageBalance ?? shortages.reduce((sum, item) => sum + Number(item.balance || 0), 0))}</strong></div>
+            <div className="branch-status-shortage-row total"><span>Total</span><strong className={shortages.reduce((sum, item) => sum + Number(item.amountOwed ?? item.amount_owed ?? 0), 0) < 0 ? "positive-figure" : "shortage-figure"}>{compactNumber(shortages.reduce((sum, item) => sum + Number(item.amountOwed ?? item.amount_owed ?? 0), 0))}</strong><strong>{compactNumber(shortages.reduce((sum, item) => sum + Number(item.paymentsToday ?? item.payments_today ?? 0), 0))}</strong><strong className={branchImbalance < 0 ? "positive-figure" : branchImbalance > 0 ? "shortage-figure" : ""}>{money(branchImbalance)}</strong></div>
           </div>
         </section>
         <footer className="branch-status-foot">Figures are consolidated across the branch for the selected business date.</footer>
