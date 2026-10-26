@@ -29,6 +29,10 @@ function money(value, label) {
   return number;
 }
 
+function missingFundsDuplicateKey(amount) {
+  return Number(amount).toFixed(2);
+}
+
 function quantity(value, label) {
   const number = Number(value ?? 0);
   if (!Number.isInteger(number) || number < 0) {
@@ -216,7 +220,45 @@ export async function createTillBalance(req, res, next) {
       if (!note) {
         const error = new Error("Enter an event or reason for each Missing Funds item."); error.statusCode = 400; throw error;
       }
-      normalizedResponsibilities.push({ amount: responsibilityAmount, note });
+      normalizedResponsibilities.push({ amount: responsibilityAmount, note, freshOccurrenceConfirmed: entry.freshOccurrenceConfirmed === true });
+    }
+    const missingFundsKeys = new Set();
+    for (const responsibility of normalizedResponsibilities) {
+      const duplicateKey = missingFundsDuplicateKey(responsibility.amount);
+      if (missingFundsKeys.has(duplicateKey)) {
+        if (responsibility.freshOccurrenceConfirmed) {
+          missingFundsKeys.add(duplicateKey);
+          continue;
+        }
+        const error = new Error(`The Missing Funds amount UGX ${responsibility.amount.toLocaleString("en-UG")} is listed more than once.`);
+        error.statusCode = 409;
+        throw error;
+      }
+      missingFundsKeys.add(duplicateKey);
+    }
+    if (missingFundsKeys.size) {
+      const existingEvents = await client.query(
+        `SELECT r.note,r.amount,r.responsibility_date,
+                r.amount-COALESCE(SUM(p.amount) FILTER (WHERE p.payment_date <= $2),0) AS outstanding
+         FROM branch_shortage_responsibilities r
+         LEFT JOIN branch_shortage_responsibility_payments p ON p.responsibility_id=r.id
+         WHERE r.till_id=$1 AND r.employee_id IS NULL AND r.responsibility_date <= $2
+         GROUP BY r.id
+         HAVING r.responsibility_date=$2
+             OR r.amount-COALESCE(SUM(p.amount) FILTER (WHERE p.payment_date <= $2),0)>0`,
+        [tillId,businessDate]
+      );
+      const existingEventsByKey = new Set(existingEvents.rows.map((event) =>
+        missingFundsDuplicateKey(event.amount)
+      ));
+      const duplicate = normalizedResponsibilities.find((item) =>
+        existingEventsByKey.has(missingFundsDuplicateKey(item.amount)) && !item.freshOccurrenceConfirmed
+      );
+      if (duplicate) {
+        const error = new Error(`A Missing Funds event with amount UGX ${duplicate.amount.toLocaleString("en-UG")} already exists for this Till. Confirm it as a fresh occurrence before recording it.`);
+        error.statusCode = 409;
+        throw error;
+      }
     }
     const newResponsibilityAmount = Number(normalizedResponsibilities.reduce((sum, entry) => sum + entry.amount, 0).toFixed(2));
     const carriedResponsibilitiesResult = await client.query(

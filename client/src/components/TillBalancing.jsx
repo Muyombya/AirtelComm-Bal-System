@@ -47,6 +47,10 @@ function formatWholeNumberEntry(value) {
   return digits ? new Intl.NumberFormat("en-UG", { maximumFractionDigits: 0 }).format(Number(digits)) : "";
 }
 
+function missingFundsDuplicateKey(amount) {
+  return inputNumber(amount).toFixed(2);
+}
+
 function formatDateTime(value) {
   return value ? new Date(value).toLocaleString("en-UG") : "—";
 }
@@ -199,6 +203,19 @@ export default function TillBalancing({ user }) {
     ));
   }
 
+  function isDuplicateMissingFundEntry(index) {
+    const entry = preBalanceResponsibilities[index];
+    const amount = inputNumber(entry?.amount);
+    if (amount <= 0) return false;
+    const draftDuplicate = preBalanceResponsibilities.some((entry, rowIndex) =>
+      rowIndex !== index && inputNumber(entry.amount) === amount
+    );
+    const existingEventDuplicate = (shortagePosition?.missingFunds || []).some((event) =>
+      Number(event.amount || 0) === amount
+    );
+    return draftDuplicate || existingEventDuplicate;
+  }
+
   useEffect(() => {
     loadTills().catch((err) => setError(err.message));
   }, [user?.role, user?.branch_id, user?.till_id, user?.till_name]);
@@ -311,6 +328,30 @@ export default function TillBalancing({ user }) {
       setError("Complete the amount and event or reason for each Missing Funds entry, or remove the incomplete row.");
       return;
     }
+    const draftNameCounts = new Map();
+    preBalanceResponsibilities.forEach((entry) => {
+      const key = missingFundsDuplicateKey(entry.amount);
+      draftNameCounts.set(key, (draftNameCounts.get(key) || 0) + 1);
+    });
+    const existingEventKeys = new Set((shortagePosition?.missingFunds || []).map((event) =>
+      missingFundsDuplicateKey(event.amount)
+    ));
+    const freshOccurrenceKeys = new Set();
+    for (const [key, count] of draftNameCounts) {
+      if (count > 1 || existingEventKeys.has(key)) freshOccurrenceKeys.add(key);
+    }
+    if (freshOccurrenceKeys.size) {
+      const repeatedEntries = preBalanceResponsibilities.filter((entry) =>
+        freshOccurrenceKeys.has(missingFundsDuplicateKey(entry.amount))
+      );
+      const summary = [...new Set(repeatedEntries.map((entry) => `UGX ${formatMoney(inputNumber(entry.amount))}`))].join(", ");
+      const confirmed = window.confirm(`These Missing Funds amounts already appear for this Till: ${summary}. Are they fresh occurrences that should be recorded separately?`);
+      if (!confirmed) {
+        setMissingFundsOpen(true);
+        setError("The repeated Missing Funds amount was not recorded. Correct the amount, or confirm it as a fresh occurrence.");
+        return;
+      }
+    }
 
     // Daily Transactions require at least two non-zero entries before
     // a balance can be recorded. Other displayed terminals may legitimately
@@ -362,7 +403,11 @@ export default function TillBalancing({ user }) {
         cashItems,
         floatBalances,
         transactionCounts: transactionPayload,
-        preBalanceResponsibilities: preBalanceResponsibilities.map((entry) => ({ amount: inputNumber(entry.amount), note: entry.note.trim() })),
+        preBalanceResponsibilities: preBalanceResponsibilities.map((entry) => ({
+          amount: inputNumber(entry.amount),
+          note: entry.note.trim(),
+          freshOccurrenceConfirmed: freshOccurrenceKeys.has(missingFundsDuplicateKey(entry.amount)),
+        })),
       },
       tillName: selectedTill?.name || context?.till?.name || "Selected Till",
       cashBreakdown: [
@@ -605,7 +650,7 @@ export default function TillBalancing({ user }) {
             <p>Record each missing-funds event. Its amount is tracked separately from the Till attendant's shortage, and the remaining Till difference may still be a shortage or excess.</p>
             {preBalanceResponsibilities.map((entry, index) => (
               <div className="missing-funds-row" key={`missing-fund-${index}`}>
-                <label><span>AMOUNT (UGX)</span><input className="missing-funds-amount" type="text" inputMode="numeric" value={entry.amount} onChange={(event) => updateMissingFund(index, "amount", formatWholeNumberEntry(event.target.value))} placeholder="0" /></label>
+                <label><span>AMOUNT (UGX)</span><input className="missing-funds-amount" type="text" inputMode="numeric" value={entry.amount} aria-invalid={isDuplicateMissingFundEntry(index)} onChange={(event) => updateMissingFund(index, "amount", formatWholeNumberEntry(event.target.value))} placeholder="0" />{isDuplicateMissingFundEntry(index) && <small className="missing-funds-duplicate-warning">This amount is already listed for this Till.</small>}</label>
                 <label><span>EVENT / REASON</span><input maxLength="240" value={entry.note} onChange={(event) => updateMissingFund(index, "note", event.target.value)} placeholder="e.g. Cash held in BFCU CDM" /></label>
                 <button className="missing-funds-remove" type="button" onClick={() => setPreBalanceResponsibilities((current) => current.filter((_, rowIndex) => rowIndex !== index))}>Remove</button>
               </div>

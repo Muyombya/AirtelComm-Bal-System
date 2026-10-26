@@ -100,16 +100,6 @@ export async function getGeneralShopStatusPdf(branchId, businessDate) {
   return { blob, filename: match?.[1] || "General-Shop-Status.pdf" };
 }
 export function sendGeneralShopStatusEmail(branchId,businessDate,payload) { return request("/general-shop-status/email-report",{method:"POST",body:JSON.stringify({branchId:Number(branchId),businessDate,...payload})}); }
-export async function saveGeneralShopStatus(branchId,businessDate,accessoriesCount,reason) {
-  const result = await request("/general-shop-status",{method:"PUT",body:JSON.stringify({branchId,businessDate,accessoriesCount,reason})});
-  notifyBranchReportChanged({ branchId, businessDate, reason: "branch-status-updated" });
-  return result;
-}
-export async function saveGeneralShopTransactionCounts(branchId,businessDate,items) {
-  const result = await request("/general-shop-status/transaction-counts",{method:"PUT",body:JSON.stringify({branchId,businessDate,items})});
-  notifyBranchReportChanged({ branchId, businessDate, reason: "branch-transaction-counts-updated" });
-  return result;
-}
 export function getCashBook(branchId,businessDate) { const p=new URLSearchParams({branchId:String(branchId),businessDate}); return request(`/cash-book?${p.toString()}`); }
 export async function saveCashBookOpeningBalance(branchId,openingBalance) {
   const result = await request("/cash-book/opening-balance",{method:"PUT",body:JSON.stringify({branchId,openingBalance})});
