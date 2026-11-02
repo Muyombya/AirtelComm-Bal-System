@@ -577,10 +577,10 @@ export default function BranchStatus({ user }) {
             <h3>Cashbook</h3>
             <div className="branch-status-table">
               <div className="branch-status-expenses-heading">Expenses</div>
-              {(cashBook.expenses || []).map((expense) => <div className="branch-status-row" key={expense.id}><span>{expense.description || expense.category || "Expense"}</span><strong className={figureTone(expense.amount)}>{money(expense.amount)}</strong></div>)}
+              {(cashBook.expenses || []).map((expense) => <div className="branch-status-row" key={expense.id}><span>{expense.description || expense.category || "Expense"}</span><strong className={`branch-status-cashbook-expense-amount ${figureTone(expense.amount)}`}>{money(expense.amount)}</strong></div>)}
               {!(cashBook.expenses || []).length && <div className="branch-status-empty">No expenses recorded</div>}
-              <div className="branch-status-row total"><span>Total Spent</span><strong className={figureTone(cashBook.dailyExpenses)}>{money(cashBook.dailyExpenses)}</strong></div>
-              <div className="branch-status-row"><span>Funds Added</span><strong className={figureTone(cashBook.dailyTopUps)}>{money(cashBook.dailyTopUps)}</strong></div>
+              <div className="branch-status-row total"><span>Total Spent</span><strong className={`branch-status-cashbook-total-spent ${figureTone(cashBook.dailyExpenses)}`}>{money(cashBook.dailyExpenses)}</strong></div>
+              <div className="branch-status-row"><span>Funds Added</span><strong className={`branch-status-cashbook-funds ${figureTone(cashBook.dailyTopUps)}`}>{money(cashBook.dailyTopUps)}</strong></div>
               <div className="branch-status-row"><span>Opening Balance</span><strong className={figureTone(cashBook.openingBalance)}>{money(cashBook.openingBalance)}</strong></div>
               <div className="branch-status-row total"><span>Closing Balance</span><strong className={figureTone(cashBook.closingBalance)}>{money(cashBook.closingBalance)}</strong></div>
             </div>
