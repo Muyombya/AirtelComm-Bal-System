@@ -94,7 +94,8 @@ export async function createCashBookEntry(req, res, next) {
     if (!["TOP_UP", "EXPENSE"].includes(entryType)) { const e = new Error("Entry Type must be TOP_UP or EXPENSE."); e.statusCode = 400; throw e; }
     const amount = positiveAmount(req.body.amount);
     const date = validDate(req.body.businessDate || new Date().toISOString().slice(0, 10));
-    const description = String(req.body.description ?? "").trim() || null;
+    const description = String(req.body.description ?? "").trim();
+    if (!description) { const e = new Error("Description is required for Cash Book entries."); e.statusCode = 400; throw e; }
     const category = String(req.body.category || "").trim() || null;
     const reference = String(req.body.reference || "").trim() || null;
     const expenseScope = String(req.body.expenseScope || (entryType === "EXPENSE" ? "BRANCH" : "BRANCH")).trim().toUpperCase();
