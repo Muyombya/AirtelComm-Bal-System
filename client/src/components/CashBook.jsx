@@ -60,6 +60,31 @@ export default function CashBook({ user }) {
     setEmailOpen(true);
   }
 
+  function downloadMonthlyCsv(){
+    if(!monthly)return;
+    const branchName=allBranches?"All Branches + Company":companyView?"Company - Central":selectedBranch?.name||user?.branch_name||"Branch";
+    const rows=[
+      ["Airtel Communications - Cash Book Expenditure Report"],
+      ["Branch / Scope",branchName],
+      ["Month",reportMonth],
+      [],
+      ["Date","Branch / Scope","Category","Description","Amount (UGX)"],
+      ...(monthly.entries||[]).map(x=>[x.businessDate,x.expenseScope==="COMPANY"?"Company / Central":x.branchName||branchName,x.category||"Other",x.description||"",x.amount]),
+      [],["Summary","Amount (UGX)"],
+      ["Funds Added",monthly.summary?.fundsAdded||0],
+      ["Branch Expenses",monthly.summary?.branchExpenses||0],
+      ["Company / Central Expenses",monthly.summary?.companyExpenses||0],
+      ["Combined Expenditure",monthly.summary?.combinedExpenses||0],
+      ["Net Movement",monthly.summary?.netMovement||0],
+    ];
+    const csv=rows.map(row=>row.map(value=>`"${String(value??"").replace(/"/g,'""')}"`).join(",")).join("\r\n");
+    const url=URL.createObjectURL(new Blob(["\uFEFF",csv],{type:"text/csv;charset=utf-8"}));
+    const link=document.createElement("a");
+    link.href=url;
+    link.download=`Cash-Book-Expenditure-${branchName.replace(/[^a-z0-9]+/gi,"-")}-${reportMonth}.csv`;
+    document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(url);
+  }
+
   async function sendReportEmail(e){
     e.preventDefault();
     setEmailSending(true);
@@ -153,7 +178,7 @@ export default function CashBook({ user }) {
 
       <section className={`cash-book-panel cash-book-company-total-panel ${user?.role==="SUPERVISOR"?"supervisor-hidden":""}`}><div className="cash-book-title">COMPANY-WIDE TOTAL EXPENDITURE — {reportMonth}</div><div className="cash-book-company-total-body"><div><span>All Branch Expenses</span><strong>{money(companyMonthly?.summary?.branchExpenses)}</strong></div><div><span>Company / Central</span><strong>{money(companyMonthly?.summary?.companyExpenses)}</strong></div><div className="cash-book-combined"><span>COMBINED TOTAL EXPENDITURE</span><strong>{money(companyMonthly?.summary?.combinedExpenses)}</strong></div></div><small>This is the combined expenditure of every branch plus all Company / Central expenses for the selected month.</small></section>
 
-      <section className="cash-book-panel cash-book-ledger-panel"><div className="cash-book-title">EXPENSE LEDGER — {allBranches?"ALL BRANCHES + COMPANY":companyView?"COMPANY / CENTRAL":selectedBranch?.name||"BRANCH"}</div><div className="cash-book-ledger-controls"><label>Ledger Month<input type="month" max={currentMonth} value={reportMonth} onChange={e=>setReportMonth(e.target.value)}/></label><label>Scope<select value={ledgerScope} onChange={e=>setLedgerScope(e.target.value)}><option value="ALL">All Expenses</option><option value="BRANCH">Branch Expenses</option><option value="COMPANY">Company / Central</option></select></label></div>{ledgerLoading?<div className="cash-book-empty">Loading expense ledger…</div>:<><div className="cash-book-ledger-summary"><div><span>Entries</span><strong>{ledger?.summary?.entries||0}</strong></div><div><span>Branch Expenses</span><strong>{money(ledger?.summary?.branchAmount)}</strong></div><div><span>Company / Central</span><strong>{money(ledger?.summary?.companyAmount)}</strong></div><div className="cash-book-combined"><span>Ledger Total</span><strong>{money(ledger?.summary?.amount)}</strong></div></div><div className="cash-book-table cash-book-expense-ledger"><div className="cash-book-row cash-book-head"><span>Date</span><span>Scope / Branch</span><span>Category</span><span>Description</span><span>Amount</span></div>{ledger?.entries?.map(x=><div className="cash-book-row" key={x.id}><span>{x.businessDate}</span><span>{x.expenseScope==="COMPANY"?"Company / Central":x.branchName||"Branch"}</span><span>{x.category||"Other"}</span><span>{x.description||"—"}</span><strong>{money(x.amount)}</strong></div>)}{!ledger?.entries?.length&&<div className="cash-book-empty">No expenses recorded for the selected month and scope.</div>}</div></>}</section>
+      <section className="cash-book-panel cash-book-ledger-panel"><div className="cash-book-title">EXPENSE LEDGER — {allBranches?"ALL BRANCHES + COMPANY":companyView?"COMPANY / CENTRAL":selectedBranch?.name||"BRANCH"}</div><div className="cash-book-ledger-controls"><label>Report Month<input type="month" max={currentMonth} value={reportMonth} onChange={e=>setReportMonth(e.target.value)}/></label><label>Scope<select value={ledgerScope} onChange={e=>setLedgerScope(e.target.value)}><option value="ALL">All Expenses</option><option value="BRANCH">Branch Expenses</option><option value="COMPANY">Company / Central</option></select></label></div>{ledgerLoading?<div className="cash-book-empty">Loading expense ledger…</div>:<><div className="cash-book-ledger-summary"><div><span>Entries</span><strong>{ledger?.summary?.entries||0}</strong></div><div><span>Branch Expenses</span><strong>{money(ledger?.summary?.branchAmount)}</strong></div><div><span>Company / Central</span><strong>{money(ledger?.summary?.companyAmount)}</strong></div><div className="cash-book-combined"><span>Ledger Total</span><strong>{money(ledger?.summary?.amount)}</strong></div></div><div className="cash-book-table cash-book-expense-ledger"><div className="cash-book-row cash-book-head"><span>Date</span><span>Scope / Branch</span><span>Category</span><span>Description</span><span>Amount</span></div>{ledger?.entries?.map(x=><div className="cash-book-row" key={x.id}><span>{x.businessDate}</span><span>{x.expenseScope==="COMPANY"?"Company / Central":x.branchName||"Branch"}</span><span>{x.category||"Other"}</span><span>{x.description||"—"}</span><strong>{money(x.amount)}</strong></div>)}{!ledger?.entries?.length&&<div className="cash-book-empty">No expenses recorded for the selected month and scope.</div>}</div></>}</section>
 
       <section className="cash-book-report-document">
         <header className="cash-book-report-header">
@@ -163,6 +188,7 @@ export default function CashBook({ user }) {
             <p>Monthly expenditure and cash control statement</p>
           </div>
           <div className="cash-book-report-actions">
+            <button type="button" onClick={downloadMonthlyCsv} disabled={reportLoading||!monthly}>Download CSV</button>
             <button type="button" onClick={()=>window.print()}>Print PDF</button>
             <button type="button" onClick={openEmailDialog} disabled={reportLoading||!monthly}>Email Report</button>
           </div>

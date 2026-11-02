@@ -6,7 +6,8 @@
 .cash-book-report-heading p{margin:0;color:#64748b;font-size:.88rem;}
 .cash-book-report-actions{display:flex;gap:9px;align-items:flex-start;flex-shrink:0;position:absolute;right:28px;top:24px;}
 .cash-book-report-actions button{border:0;border-radius:7px;padding:9px 14px;font-weight:750;cursor:pointer;}
-.cash-book-report-actions button:first-child{background:#334155;color:#fff;}
+.cash-book-report-actions button:first-child{background:#0f766e;color:#fff;}
+.cash-book-report-actions button:nth-child(2){background:#334155;color:#fff;}
 .cash-book-report-actions button:last-child{background:#2563eb;color:#fff;}
 .cash-book-report-actions button:disabled{opacity:.55;cursor:not-allowed;}
 .cash-book-report-meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-bottom:1px solid #dbe3ec;background:#f8fafc;}
@@ -70,14 +71,17 @@
 
 @media print{
  @page{size:A4;margin:12mm;}
+ html,body,#root{height:auto!important;min-height:0!important;margin:0!important;padding:0!important;background:#fff!important;overflow:visible!important;}
  body{background:#fff!important;}
- body *{visibility:hidden!important;}
- .cash-book-report-document,.cash-book-report-document *{visibility:visible!important;}
- .cash-book-report-document{position:absolute;left:0;top:0;width:100%;margin:0!important;border:0!important;}
+ .app-nav{display:none!important;}
+ .cash-book-page{display:block!important;position:static!important;width:auto!important;min-height:0!important;margin:0!important;padding:0!important;overflow:visible!important;}
+ .cash-book-page>:not(.cash-book-report-document){display:none!important;}
+ .cash-book-report-document{display:block!important;position:static!important;left:auto;top:auto;width:100%;height:auto!important;min-height:0!important;margin:0!important;border:0!important;overflow:visible!important;}
  .cash-book-report-actions,.cash-book-email-overlay{display:none!important;}
  .cash-book-report-header{padding:0 0 10px;}
  .cash-book-report-meta{background:#fff;}
- .cash-book-report-section{break-inside:avoid;}
- .cash-book-report-footer{break-inside:avoid;}
+ .cash-book-report-section{break-inside:auto;page-break-inside:auto;}
+ .cash-book-report-table-row{break-inside:avoid;page-break-inside:avoid;}
+ .cash-book-report-footer{break-inside:avoid;page-break-inside:avoid;break-after:avoid-page;page-break-after:avoid;}
 }
 .cash-book-entry-review-overlay{position:fixed;inset:0;z-index:1001;background:rgba(15,23,42,.62);display:flex;align-items:center;justify-content:center;padding:18px}.cash-book-entry-review{width:min(650px,100%);max-height:calc(100vh - 36px);overflow:auto;box-sizing:border-box;background:#fff;border:1px solid #cbd5e1;border-radius:14px;box-shadow:0 24px 70px rgba(0,0,0,.28);padding:22px}.cash-book-entry-review>header{padding-bottom:13px;border-bottom:1px solid #e2e8f0}.cash-book-entry-review>header span{color:#64748b;font-size:10px;font-weight:800;letter-spacing:.06em}.cash-book-entry-review h2{margin:5px 0;font-size:20px;color:#172a40}.cash-book-entry-review>header p{margin:0;color:#64748b;font-size:13px}.cash-book-entry-review-summary{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}.cash-book-entry-review-summary>div{display:flex;flex-direction:column;gap:4px;min-width:0;padding:10px;border:1px solid #dbe3ec;border-radius:8px;background:#f8fafc}.cash-book-entry-review-summary span{color:#64748b;font-size:10px;font-weight:800;text-transform:uppercase}.cash-book-entry-review-summary strong{overflow-wrap:anywhere;font-variant-numeric:tabular-nums}.cash-book-entry-review-impact{margin-top:10px;padding:11px;border-radius:8px;background:#edf3f8;color:#24496d;font-size:13px}.cash-book-entry-review-impact p{margin:0;line-height:1.6}.cash-book-entry-review-check{display:flex;align-items:flex-start;gap:9px;margin-top:12px;padding:10px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;color:#334155;font-size:12px;font-weight:700}.cash-book-entry-review-check input{margin-top:2px}.cash-book-entry-review-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}.cash-book-entry-review-actions button{border:1px solid #94a3b8;border-radius:8px;background:#fff;color:#1e3a8a;padding:9px 12px;font-weight:800;cursor:pointer}.cash-book-entry-review-actions button:last-child{border-color:#2563eb;background:#2563eb;color:#fff}.cash-book-entry-review-actions button:disabled{opacity:.5;cursor:not-allowed}@media(max-width:540px){.cash-book-entry-review{padding:16px}.cash-book-entry-review-actions{position:sticky;bottom:-16px;padding:10px 0 0;background:#fff}.cash-book-entry-review-actions button{flex:1}}
