@@ -198,7 +198,7 @@ function createBranchStatusSvg({ branchName, branchTint, date, groups, totals, t
   cashY += 18;
   expenses.forEach((expense) => {
     text(cashX + 4, cashY + 6, fitted(expense.description || expense.category || "Expense", 18), { size: font.body, weight: 600 });
-    text(cashX + cardWidth - 4, cashY + 6, formatAmount(expense.amount, true), { size: font.compact, weight: 700, color: amountColor(expense.amount), anchor: "end" });
+    text(cashX + cardWidth - 4, cashY + 6, formatAmount(expense.amount, true), { size: font.compact, weight: 700, color: "#ff4500", anchor: "end" });
     line(cashX + 3, cashY + 9, cashX + cardWidth - 3, cashY + 9);
     cashY += 12;
   });
@@ -213,7 +213,12 @@ function createBranchStatusSvg({ branchName, branchTint, date, groups, totals, t
     ["Closing Balance", cashBook.closingBalance, true],
   ].forEach(([label, value, bold]) => {
     text(cashX + 4, cashY + 7, label, { size: font.label, weight: bold ? 800 : 500 });
-    text(cashX + cardWidth - 4, cashY + 7, formatAmount(value, true), { size: font.compact, weight: bold ? 800 : 500, color: amountColor(value), anchor: "end" });
+    const valueColor = label === "Total Spent"
+      ? "#ff4500"
+      : label === "Funds Added"
+        ? "#228b22"
+        : amountColor(value);
+    text(cashX + cardWidth - 4, cashY + 7, formatAmount(value, true), { size: font.compact, weight: bold ? 800 : 500, color: valueColor, anchor: "end" });
     cashY += 11;
   });
 
